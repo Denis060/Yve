@@ -1,0 +1,66 @@
+name: yve
+description: Yve — your calm AI learning workspace. Scan, ask, organize what you learn.
+publish_to: 'none'
+version: 0.2.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Backend
+  supabase_flutter: ^2.5.0
+
+  # State management
+  flutter_riverpod: ^2.5.0
+
+  # UI
+  google_fonts: ^6.2.0
+
+  # Storage / files
+  shared_preferences: ^2.3.0
+  file_picker: ^8.0.0
+
+  # Camera + gallery — powers the Scan tab and chat image attachments
+  image_picker: ^1.1.0
+
+  # Direct HTTP — Supabase SDK's functions.invoke() returns a single Response,
+  # so streaming chats bypass it and POST to the Edge Function URL ourselves.
+  http: ^1.2.0
+
+  # Voice — device-native STT + TTS for the "hands-free study" use case.
+  # iOS needs NSMicrophoneUsageDescription + NSSpeechRecognitionUsageDescription
+  # in Info.plist; Android needs RECORD_AUDIO permission.
+  speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.0
+
+  # Local daily review nudges. Cross-device push via FCM lands later — this
+  # slice schedules on-device so no Firebase project setup is required.
+  # See README "Notifications" for the iOS / Android permission entries.
+  flutter_local_notifications: ^17.2.0
+  flutter_timezone: ^3.0.1
+  timezone: ^0.9.4
+
+  # Render Yve's markdown responses (bold, lists, headings, code, links).
+  # Streaming-friendly — re-parses on each delta as the text grows.
+  flutter_markdown: ^0.7.4
+
+  # Export Yve's responses — copy to clipboard, save as .md or Word.
+  # share_plus routes per platform: web triggers download, mobile opens
+  # the system share sheet. `markdown` lets us render to HTML for Word.
+  share_plus: ^10.1.2
+  markdown: ^7.2.2
+
+  # Misc
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

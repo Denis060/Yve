@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl *)",
+      "Bash(python *)",
+      "Bash(flutter --version)",
+      "PowerShell(flutter *)",
+      "Read(//c/Users/fofan/scoop/apps/flutter/current/**)",
+      "Read(//c/src/flutter/**)",
+      "Read(//c/flutter/**)",
+      "Read(//c/Users/fofan/**)",
+      "Read(//tmp/**)",
+      "Bash(xxd)",
+      "Bash(zcat /tmp/deployed.bin)",
+      "Bash(unzip -p /tmp/deployed.bin)",
+      "Bash(C:/Users/fofan/Downloads/flutter_windows_3.41.9-stable/flutter/bin/flutter.bat analyze *)",
+      "Bash(C:/Users/fofan/Downloads/flutter_windows_3.41.9-stable/flutter/bin/flutter.bat devices *)",
+      "Bash(C:/Users/fofan/Downloads/flutter_windows_3.41.9-stable/flutter/bin/flutter.bat run *)",
+      "Bash(grep -qE \"is being served at|lib/main\\\\\\\\.dart.*Error|Error:\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\b1kmjr7ve.output\")",
+      "Bash(tail -20 \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\b1kmjr7ve.output\")",
+      "Bash(grep -qE \"is being served at|This application is linked to|Error:\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\b9mvgke1y.output\")",
+      "Bash(tail -15 \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\b9mvgke1y.output\")",
+      "Bash(tail *)",
+      "Bash(grep -E \"polish|Polish|Wrap|FollowUp|chip|Stack overflow|Exception\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\b9mvgke1y.output\")",
+      "Bash(grep -qE \"is being served at|Failed to compile|Error:\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bepkiuimy.output\")",
+      "Bash(cat *)",
+      "Bash(grep -E \"is being served|lib/main\\\\\\\\.dart is being served|Error:|Failed to compile\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bepkiuimy.output\")",
+      "Bash(grep -nE \"served at|Debug service|http://localhost\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bepkiuimy.output\")",
+      "Bash(grep -qE \"Debug service listening|Failed to compile|Error compiling\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bhrce9n5x.output\")",
+      "Bash(grep -E \"Debug service|http://localhost|Failed to compile|Error\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bhrce9n5x.output\")",
+      "Bash(C:/Users/fofan/Downloads/flutter_windows_3.41.9-stable/flutter/bin/flutter.bat test *)",
+      "Bash(grep -qE \"Debug service listening|Failed to compile|Error compiling\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bcm7i2ltb.output\")",
+      "Bash(grep -E \"Debug service|Error compiling|Failed to compile\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bcm7i2ltb.output\")",
+      "Bash(grep -qE \"Debug service listening|Failed to compile|Error compiling\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bmrdqbe4h.output\")",
+      "Bash(grep -E \"Debug service|Error compiling|Failed to compile\" \"C:\\\\\\\\Users\\\\\\\\fofan\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Temp\\\\\\\\claude\\\\\\\\C--Apps-StudyBuddy\\\\\\\\8414e696-b0cb-4b53-b58c-c60933fdaa0a\\\\\\\\tasks\\\\\\\\bmrdqbe4h.output\")"
+    ]
+  }
+}

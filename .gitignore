@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.local
+.env.*.local
+# Note: mobile/lib/config/env.dart only holds compile-time defaults.
+# Real keys should be passed via --dart-define at build time, not pasted here.
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/.idea/
+mobile/.vscode/
+mobile/pubspec.lock
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Generated.xcconfig
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/build/
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+
+# OS
+.DS_Store
+Thumbs.db
