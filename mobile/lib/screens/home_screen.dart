@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/account.dart';
@@ -17,6 +18,8 @@ import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
 import '../utils/app_error.dart';
 import '../widgets/activity_strip.dart';
+import '../widgets/anonymous_continuation_panel.dart';
+import '../widgets/subject_limit_sheet.dart';
 import '../widgets/presence_card.dart';
 import '../widgets/recap_sheet.dart';
 import '../widgets/review_queue_card.dart';
@@ -41,15 +44,20 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // valueOrNull rather than .value — the latter rethrows on
+    // AsyncError state, so any network blip in any of these providers
+    // crashes the build with an unhandled exception (captured by
+    // Sentry as fatal). Same fix pattern across HomeScreen +
+    // AppShell._reschedule (2026-05-19).
     final List<Subject> subjects =
-        ref.watch(subjectsProvider).value ?? const <Subject>[];
+        ref.watch(subjectsProvider).valueOrNull ?? const <Subject>[];
     final List<StudySession> recent =
-        ref.watch(recentSessionsProvider).value ?? const <StudySession>[];
+        ref.watch(recentSessionsProvider).valueOrNull ?? const <StudySession>[];
     final List<ConceptReview> reviewQueue =
-        ref.watch(reviewQueueProvider).value ?? const <ConceptReview>[];
+        ref.watch(reviewQueueProvider).valueOrNull ?? const <ConceptReview>[];
     final List<DailyActivity> week =
-        ref.watch(weekActivityProvider).value ?? const <DailyActivity>[];
-    final Account? account = ref.watch(accountProvider).value;
+        ref.watch(weekActivityProvider).valueOrNull ?? const <DailyActivity>[];
+    final Account? account = ref.watch(accountProvider).valueOrNull;
     final String greetingName = account?.friendlyName ?? 'there';
     final String tip = _tips[DateTime.now().day % _tips.length];
 
@@ -91,30 +99,51 @@ class HomeScreen extends ConsumerWidget {
             },
     );
 
+    // Up next merges what used to be three sections (Presence card,
+    // Revisit, Continue) into one prioritized list. Same widgets, same
+    // navigation — just one "what to do next" door instead of three.
+    // Cap at 5 combined slots so the section stays scannable.
+    final List<_UpNextItem> upNext = <_UpNextItem>[];
+    int remaining = 5;
+    if (presence != null && remaining > 0) {
+      upNext.add(_UpNextItem.presence(presence));
+      remaining--;
+    }
+    final int reviewSlots = remaining.clamp(0, 3);
+    for (final ConceptReview r in reviewQueue.take(reviewSlots)) {
+      upNext.add(_UpNextItem.review(r));
+      remaining--;
+    }
+    final int recentSlots = remaining.clamp(0, 2);
+    for (final StudySession s in recent.take(recentSlots)) {
+      upNext.add(_UpNextItem.recent(s));
+      remaining--;
+    }
+
     return SafeArea(
       bottom: false,
       child: ListView(
         padding: EdgeInsets.zero,
         children: <Widget>[
-          _Header(name: greetingName, week: week),
-          if (presence != null) ...<Widget>[
-            const SizedBox(height: YveSpacing.lg),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: YveSpacing.xl),
-              child: PresenceCard(line: presence),
-            ),
-          ],
+          _Header(name: greetingName, week: week, tip: tip),
           const SizedBox(height: YveSpacing.lg),
           _QuickBar(
+            // Assignment lands in the redesigned empty state — no draft,
+            // so the snap-a-photo CTA can do the talking.
             onAssignment: () => _openChat(
               context,
               mode: StudyMode.assignment,
-              draft: 'Help me solve this assignment: ',
+              draft: '',
             ),
             onScan: () => _openChat(
               context,
               mode: StudyMode.open,
               draft: 'I have a question from a photo — let me describe it: ',
+            ),
+            onPolish: () => _openChat(
+              context,
+              mode: StudyMode.write,
+              draft: '',
             ),
             onQuiz: () => _openChat(
               context,
@@ -122,60 +151,18 @@ class HomeScreen extends ConsumerWidget {
               draft: 'Quiz me on ',
             ),
           ),
-          if (reviewQueue.isNotEmpty) ...<Widget>[
+          if (upNext.isNotEmpty) ...<Widget>[
             const SizedBox(height: YveSpacing.xxl),
-            const _SectionLabel(text: 'Revisit'),
+            const _SectionLabel(text: 'Up next'),
             const SizedBox(height: YveSpacing.md),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: YveSpacing.xl),
               child: Column(
                 children: <Widget>[
-                  for (final ConceptReview r in reviewQueue.take(3)) ...<Widget>[
-                    ReviewRow(
-                      review: r,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => ChatScreen(
-                            subjectId: r.subjectId,
-                            subjectName: r.subjectName,
-                            subjectEmoji: r.subjectEmoji,
-                            initialMode: StudyMode.practice,
-                            initialDraft: 'Quiz me on ${r.concept}',
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: YveSpacing.sm),
-                  ],
-                ],
-              ),
-            ),
-          ],
-          if (recent.isNotEmpty) ...<Widget>[
-            const SizedBox(height: YveSpacing.xxl),
-            _SectionLabel(text: 'Continue'),
-            const SizedBox(height: YveSpacing.md),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: YveSpacing.xl),
-              child: Column(
-                children: <Widget>[
-                  for (final StudySession s in recent.take(2)) ...<Widget>[
-                    _SessionCard(
-                      session: s,
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => ChatScreen.resume(
-                            sessionId: s.id,
-                            sessionTitle: s.title,
-                            subjectId: s.subjectId,
-                            subjectName: s.subjectName,
-                            subjectEmoji: s.subjectEmoji,
-                            initialMode: s.mode,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: YveSpacing.sm),
+                  for (int i = 0; i < upNext.length; i++) ...<Widget>[
+                    _renderUpNext(context, ref, upNext[i]),
+                    if (i < upNext.length - 1)
+                      const SizedBox(height: YveSpacing.sm),
                   ],
                 ],
               ),
@@ -214,15 +201,55 @@ class HomeScreen extends ConsumerWidget {
               onTap: () => showYveRecap(context, ref),
             ),
           ),
-          const SizedBox(height: YveSpacing.md),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: YveSpacing.xl),
-            child: _TipCard(text: tip),
-          ),
           const SizedBox(height: 32),
         ],
       ),
     );
+  }
+
+  Widget _renderUpNext(
+    BuildContext context,
+    WidgetRef ref,
+    _UpNextItem item,
+  ) {
+    switch (item.kind) {
+      case _UpNextKind.presence:
+        return PresenceCard(line: item.presence!);
+      case _UpNextKind.review:
+        final ConceptReview r = item.review!;
+        return ReviewRow(
+          review: r,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ChatScreen(
+                subjectId: r.subjectId,
+                subjectName: r.subjectName,
+                subjectEmoji: r.subjectEmoji,
+                initialMode: StudyMode.practice,
+                initialDraft: 'Quiz me on ${r.concept}',
+              ),
+            ),
+          ),
+        );
+      case _UpNextKind.recent:
+        final StudySession s = item.session!;
+        return _SessionCard(
+          session: s,
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => ChatScreen.resume(
+                sessionId: s.id,
+                sessionTitle: s.title,
+                subjectId: s.subjectId,
+                subjectName: s.subjectName,
+                subjectEmoji: s.subjectEmoji,
+                initialMode: s.mode,
+              ),
+            ),
+          ),
+          onLongPress: () => _confirmDeleteSession(context, ref, s),
+        );
+    }
   }
 
   void _openChat(
@@ -285,22 +312,79 @@ class HomeScreen extends ConsumerWidget {
             .addSubject(name: name, emoji: '✨');
       } catch (e) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              AppError.from(e, actionContext: 'create_subject').userMessage,
-            ),
-          ),
-        );
+        final AppError err = AppError.from(e, actionContext: 'create_subject');
+        if (err.code == 'anonymous_subject_limit') {
+          await showAnonymousContinuation(context);
+        } else if (err.code == 'subject_limit') {
+          await showSubjectLimitSheet(context);
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(err.userMessage)),
+          );
+        }
       }
+    }
+  }
+
+  /// Long-press on a recent-session card → confirm + delete. We delete
+  /// straight from the session list (no separate edit screen) — that
+  /// matches every chat app the user has ever used.
+  Future<void> _confirmDeleteSession(
+    BuildContext context,
+    WidgetRef ref,
+    StudySession session,
+  ) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Delete this chat?'),
+        content: Text(
+          '"${session.title}" and all its messages will be removed. '
+          'This can\'t be undone.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: YveColors.error,
+              foregroundColor: YveColors.textInverse,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    try {
+      HapticFeedback.heavyImpact();
+      await ref
+          .read(recentSessionsProvider.notifier)
+          .deleteSession(session.id);
+      // Subjects display a session count — refresh so the badge moves.
+      ref.invalidate(subjectsProvider);
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(
+            AppError.from(e, actionContext: 'delete_session').userMessage)),
+      );
     }
   }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.name, required this.week});
+  const _Header({
+    required this.name,
+    required this.week,
+    required this.tip,
+  });
   final String name;
   final List<DailyActivity> week;
+  final String tip;
 
   String get _greeting {
     final int hour = DateTime.now().hour;
@@ -345,6 +429,19 @@ class _Header extends StatelessWidget {
             const SizedBox(height: YveSpacing.md),
             ActivityStrip(week: week),
           ],
+          const SizedBox(height: YveSpacing.md),
+          // Tip moved here from the bottom of the screen — under the
+          // activity strip it actually gets read instead of being
+          // scrolled past. Muted color so it doesn't compete with the
+          // name and greeting.
+          Text(
+            tip,
+            style: TextStyle(
+              fontSize: 12,
+              color: YveColors.tintGreen.withValues(alpha: 0.85),
+              height: 1.4,
+            ),
+          ),
         ],
       ),
     );
@@ -422,11 +519,13 @@ class _QuickBar extends StatelessWidget {
   const _QuickBar({
     required this.onAssignment,
     required this.onScan,
+    required this.onPolish,
     required this.onQuiz,
   });
 
   final VoidCallback onAssignment;
   final VoidCallback onScan;
+  final VoidCallback onPolish;
   final VoidCallback onQuiz;
 
   @override
@@ -440,6 +539,8 @@ class _QuickBar extends StatelessWidget {
           YvePill(label: 'Solve assignment', filled: true, onTap: onAssignment),
           const SizedBox(width: YveSpacing.sm),
           YvePill(label: 'Scan & ask', onTap: onScan),
+          const SizedBox(width: YveSpacing.sm),
+          YvePill(label: 'Polish writing', onTap: onPolish),
           const SizedBox(width: YveSpacing.sm),
           YvePill(label: 'Quiz me', onTap: onQuiz),
         ],
@@ -470,10 +571,15 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _SessionCard extends StatelessWidget {
-  const _SessionCard({required this.session, required this.onTap});
+  const _SessionCard({
+    required this.session,
+    required this.onTap,
+    this.onLongPress,
+  });
 
   final StudySession session;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   String _relative() {
     final Duration diff = DateTime.now().difference(session.updatedAt);
@@ -488,6 +594,7 @@ class _SessionCard extends StatelessWidget {
     final TextTheme text = Theme.of(context).textTheme;
     return YveCard(
       onTap: onTap,
+      onLongPress: onLongPress,
       padding: const EdgeInsets.symmetric(
         horizontal: YveSpacing.lg,
         vertical: 14,
@@ -670,47 +777,23 @@ class _DottedPainter extends CustomPainter {
   bool shouldRepaint(_DottedPainter oldDelegate) => false;
 }
 
-class _TipCard extends StatelessWidget {
-  const _TipCard({required this.text});
-  final String text;
+/// A single row in the unified "Up next" list. Three flavors:
+/// - [presence] — wraps a [PresenceLine] (resume / review-due hint)
+/// - [review] — a [ConceptReview] from the spaced-repetition queue
+/// - [recent] — a [StudySession] the user worked on recently
+enum _UpNextKind { presence, review, recent }
 
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(YveSpacing.lg),
-      decoration: BoxDecoration(
-        color: YveColors.primarySurface,
-        borderRadius: YveSpacing.cardRadius,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: const <Widget>[
-              Icon(Icons.auto_awesome, size: 14, color: YveColors.primaryLight),
-              SizedBox(width: 4),
-              Text(
-                'YVE TIP',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: YveColors.primaryLight,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 13,
-              color: YveColors.primary,
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+class _UpNextItem {
+  const _UpNextItem._(this.kind, this.presence, this.review, this.session);
+  factory _UpNextItem.presence(PresenceLine? p) =>
+      _UpNextItem._(_UpNextKind.presence, p, null, null);
+  factory _UpNextItem.review(ConceptReview r) =>
+      _UpNextItem._(_UpNextKind.review, null, r, null);
+  factory _UpNextItem.recent(StudySession s) =>
+      _UpNextItem._(_UpNextKind.recent, null, null, s);
+
+  final _UpNextKind kind;
+  final PresenceLine? presence;
+  final ConceptReview? review;
+  final StudySession? session;
 }

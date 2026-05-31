@@ -35,7 +35,7 @@ enum StudyMode {
         StudyMode.open => 'Open conversation',
         StudyMode.learn => 'Build understanding, concept by concept',
         StudyMode.practice => 'Drill questions and flashcards',
-        StudyMode.assignment => 'Worked solutions you can actually learn from',
+        StudyMode.assignment => 'Get it done. Snap, upload, or paste.',
         StudyMode.write => 'Polish, structure, keep your voice',
         StudyMode.materials => 'Ask your library — grounded in what you uploaded',
       };

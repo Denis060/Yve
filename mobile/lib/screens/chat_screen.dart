@@ -26,6 +26,7 @@ import '../services/subjects_service.dart';
 import '../services/vision_service.dart';
 import '../services/voice_service.dart';
 import '../utils/app_error.dart';
+import '../widgets/anonymous_continuation_panel.dart';
 import '../widgets/mode_switcher.dart';
 import '../widgets/polish_bubble.dart';
 import '../widgets/quota_exceeded_card.dart';
@@ -35,6 +36,8 @@ import '../widgets/scan_result_sheet.dart';
 import '../widgets/speak_aloud_button.dart';
 import '../widgets/upgrade_sheet.dart';
 import '../widgets/voice_input_button.dart';
+import '../widgets/yve_markdown.dart';
+import '../widgets/yve_pill.dart';
 import '../widgets/yve_reading_overlay.dart';
 import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
@@ -94,6 +97,16 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
+  /// Max attachments accepted in a single batch. Each one is a sequential
+  /// vision-ingest call, so an uncapped pick (40 photos) means a long,
+  /// quota-draining batch and possible Edge-function rate-limiting. 5 keeps
+  /// "Reading 4 of 5…" fast while covering the realistic worksheet case.
+  static const int _maxBatchFiles = 5;
+
+  /// Per-image byte ceiling. Mirrors the 25 MB guard already applied to
+  /// PDFs/DOCX so a giant photo can't blow the vision-ingest payload.
+  static const int _maxAttachmentBytes = 25 * 1024 * 1024;
+
   final TextEditingController _input = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final List<ChatMessage> _messages = <ChatMessage>[];
@@ -114,6 +127,34 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   late StudyMode _mode = widget.initialMode;
   String? _sessionId;
 
+  /// Smart actions surfaced right after a multi-question worksheet
+  /// upload in Assignment mode. The learner came here to get the work
+  /// solved — these chips capture intent in one tap instead of forcing
+  /// them to type "answer all questions" (the bug the user hit on
+  /// 2026-05-19). Cleared on first send.
+  List<_SmartAction>? _smartActions;
+
+  /// Extracted text from a batch attach (2+ files at once). Stays out of
+  /// the input box (could be tens of thousands of words) and gets
+  /// prepended to the next outgoing message — typed or smart-action.
+  /// The pending-attachment pill shows learners what's queued and lets
+  /// them discard it before sending.
+  String? _pendingAttachmentText;
+  List<String> _pendingAttachmentNames = const <String>[];
+
+  /// Batch-scan progress for the reading overlay — "Reading 2 of 5…"
+  /// is less anxiety-inducing than an indeterminate spinner when the
+  /// learner just uploaded a fistful of PDFs.
+  int _batchTotal = 0;
+  int _batchProgress = 0;
+
+  /// Cached VoiceService so dispose() can stop any in-flight TTS/STT
+  /// without calling `ref.read`. ConsumerStatefulElement disposes ref
+  /// before our dispose() runs, so a `ref.read` here throws
+  /// `Cannot use "ref" after the widget was disposed` (caught in
+  /// Sentry 2026-05-18).
+  VoiceService? _voice;
+
   @override
   void initState() {
     super.initState();
@@ -131,8 +172,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // spoken words on top without losing either.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final VoiceService voice = ref.read(voiceServiceProvider);
+      _voice = voice; // cache for dispose()
       _voiceTextSub = voice.recognizedText.listen((String recognized) {
         if (!mounted) return;
+        // A late voice event arriving *during* send would overwrite the
+        // input we just cleared — mom kept seeing her last question
+        // sitting in the box after sending it. Guard with _sending so
+        // post-send events get dropped.
+        if (_sending) return;
+        if (!_listening) return;
         _input.text = '$_voicePrefix$recognized'.trimLeft();
         _input.selection = TextSelection.collapsed(offset: _input.text.length);
       });
@@ -204,10 +252,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _voiceTextSub?.cancel();
     _voiceListeningSub?.cancel();
     _ttsCompletionSub?.cancel();
-    // Stop any ongoing voice activity tied to this screen.
-    final VoiceService voice = ref.read(voiceServiceProvider);
-    voice.stopListening();
-    voice.stopSpeaking();
+    // Use the cached VoiceService — `ref` is unavailable in dispose().
+    _voice?.stopListening();
+    _voice?.stopSpeaking();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -215,7 +262,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   bool _handsFreeBannerVisible() {
     if (_handsFreePausedForSession) return false;
-    final LearnerProfile? profile = ref.read(profileProvider).value;
+    final LearnerProfile? profile = ref.read(profileProvider).valueOrNull;
     return profile?.handsFreeActive ?? false;
   }
 
@@ -223,7 +270,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// and we're in a clean idle state, auto-start STT for the next turn.
   Future<void> _maybeStartAutoListen() async {
     if (!mounted) return;
-    final LearnerProfile? profile = ref.read(profileProvider).value;
+    final LearnerProfile? profile = ref.read(profileProvider).valueOrNull;
     if (profile == null || !profile.handsFreeActive) return;
     if (_handsFreePausedForSession) return;
     if (_sending || _scanning || _listening || _loadingHistory) return;
@@ -266,10 +313,67 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     await voice.startListening();
   }
 
+  /// Decide whether to surface the Assignment-mode "what should I do?"
+  /// chip strip. Only fires when the chat just adopted an uploaded
+  /// document AND we're in Assignment mode AND the doc looks like a
+  /// multi-question worksheet (or has enough extracted text to suggest
+  /// it). The chips disappear as soon as the learner sends anything.
+  void _maybeOfferSmartActions(ScanResult sr) {
+    if (_mode != StudyMode.assignment) return;
+    final bool looksLikeWorksheet =
+        sr.documentType == DocumentType.worksheet ||
+            sr.extractedText.length > 600;
+    if (!looksLikeWorksheet) return;
+    setState(() {
+      _smartActions = const <_SmartAction>[
+        _SmartAction(
+          label: 'Solve all questions',
+          prompt:
+              'Solve every question in this assignment, organized section by section. Answer all of them in full — short answers, true/false, multiple choice, scenarios, everything. Don\'t summarize and stop; work through the whole document.',
+          filled: true,
+        ),
+        _SmartAction(
+          label: 'Section by section',
+          prompt:
+              'Walk me through this assignment one section at a time. Solve Section 1 in full first, then pause and let me say "next" before continuing.',
+        ),
+        _SmartAction(
+          label: 'Explain concepts first',
+          prompt:
+              'Before solving, give me a clear explanation of the key concepts this assignment covers. Then we can work through the questions together.',
+        ),
+      ];
+    });
+  }
+
   Future<void> _send([String? overrideText]) async {
-    final String text = (overrideText ?? _input.text).trim();
+    final String typed = (overrideText ?? _input.text).trim();
+    // Multi-file batch attaches stash their combined extracted text here;
+    // prepend it to the outgoing message so Yve sees the documents
+    // regardless of whether the learner typed something themselves or
+    // tapped a smart-action chip.
+    final String pending = _pendingAttachmentText ?? '';
+    final String text;
+    if (pending.isEmpty) {
+      text = typed;
+    } else if (typed.isEmpty) {
+      text = pending;
+    } else {
+      text = '$pending\n\n---\n\n$typed';
+    }
     if (text.isEmpty || _sending) return;
     HapticFeedback.lightImpact();
+    // First send clears the smart-action strip — once the learner has
+    // expressed intent (via chip or typing), we hide the prompts.
+    if (_smartActions != null) {
+      setState(() => _smartActions = null);
+    }
+    // Pending attachment is consumed on send — no second-prepend on the
+    // next turn. The user bubble already carries the full text.
+    if (_pendingAttachmentText != null) {
+      _pendingAttachmentText = null;
+      _pendingAttachmentNames = const <String>[];
+    }
 
     final ChatMessage userMsg = ChatMessage(
       id: 'u${DateTime.now().millisecondsSinceEpoch}',
@@ -285,6 +389,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       createdAt: DateTime.now(),
       isStreaming: true,
     );
+
+    // Stop the mic and reset voice state *before* we clear the field —
+    // otherwise a late-arriving recognized-text event can re-populate
+    // the input box right after we cleared it, leaving the user's words
+    // lingering in the box even though they've already been sent.
+    final VoiceService voice = ref.read(voiceServiceProvider);
+    if (_listening) {
+      unawaited(voice.stopListening());
+    }
+    _voicePrefix = '';
 
     setState(() {
       _messages.add(userMsg);
@@ -425,7 +539,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   /// stream chunks. Silent no-op when the preference is off or the message
   /// has no body.
   void _maybeAutoSpeak(ChatMessage msg) {
-    final LearnerProfile? profile = ref.read(profileProvider).value;
+    final LearnerProfile? profile = ref.read(profileProvider).valueOrNull;
     if (profile == null || !profile.readAloud) return;
     if (msg.text.trim().isEmpty) return;
     ref.read(voiceServiceProvider).speak(msg.id, msg.text);
@@ -489,21 +603,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     await _send(s.effectivePrompt);
   }
 
-  /// Capture or pick an image, run it through vision-ingest, then append the
-  /// extracted text as a user turn in *this* conversation. Keeps multimodal
-  /// fluid — no leaving the chat to scan something into it.
+  /// Capture or pick image(s), run them through vision-ingest, then route
+  /// based on count:
+  ///  - 1 image  → existing single-file flow (session adoption / scan sheet).
+  ///  - 2+ images → batch-process, combine extracted text into a pending
+  ///    attachment that gets prepended to the learner's next message.
+  ///    Camera is inherently one-shot; gallery uses pickMultiImage.
   Future<void> _scanIntoChat(ImageSource source) async {
     if (_scanning || _sending) return;
     HapticFeedback.lightImpact();
 
-    XFile? file;
+    List<XFile> files;
     try {
-      file = await _picker.pickImage(
-        source: source,
-        maxWidth: 1600,
-        maxHeight: 1600,
-        imageQuality: 85,
-      );
+      if (source == ImageSource.gallery) {
+        // NB: image_picker 1.0.7 has no native `limit:` param, so we cap
+        // after the fact in the trim step below.
+        files = await _picker.pickMultiImage(
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 85,
+        );
+      } else {
+        final XFile? one = await _picker.pickImage(
+          source: source,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 85,
+        );
+        files = one == null ? <XFile>[] : <XFile>[one];
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -515,8 +643,60 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       );
       return;
     }
-    if (file == null) return;
+    if (files.isEmpty) return;
 
+    // Enforce the batch cap. `limit:` is only honored on iOS 14+/Android,
+    // so web and older platforms can still hand back more — trim and tell
+    // the learner what we kept.
+    final bool trimmed = files.length > _maxBatchFiles;
+    if (trimmed) files = files.sublist(0, _maxBatchFiles);
+
+    // Size guard: drop oversized images before they hit vision-ingest.
+    final List<XFile> ok = <XFile>[];
+    final List<String> rejected = <String>[];
+    for (final XFile f in files) {
+      if (await f.length() > _maxAttachmentBytes) {
+        rejected.add('${f.name} (>25 MB)');
+      } else {
+        ok.add(f);
+      }
+    }
+    if (mounted && (trimmed || rejected.isNotEmpty)) {
+      final List<String> notes = <String>[
+        if (trimmed) 'Added the first $_maxBatchFiles — that\'s the limit per batch.',
+        if (rejected.isNotEmpty) 'Skipped: ${rejected.join(', ')}',
+      ];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(notes.join(' '))),
+      );
+    }
+    if (ok.isEmpty) return;
+
+    if (ok.length == 1) {
+      await _processSingleImage(ok.first);
+    } else {
+      // Build pending-scan list and hand to the batch helper. Each entry
+      // captures the async call so the helper doesn't care whether it's
+      // an image or a file under the hood.
+      final List<_PendingScan> scans = <_PendingScan>[];
+      for (final XFile f in ok) {
+        scans.add(_PendingScan(
+          name: f.name,
+          process: () async {
+            final Uint8List bytes = await f.readAsBytes();
+            return ref.read(visionServiceProvider).analyze(
+                  bytes: bytes,
+                  mimeType: _mimeFromName(f.name),
+                  subjectId: widget.subjectId,
+                );
+          },
+        ));
+      }
+      await _processBatchScans(scans);
+    }
+  }
+
+  Future<void> _processSingleImage(XFile file) async {
     final Uint8List bytes = await file.readAsBytes();
     final String mime = _mimeFromName(file.name);
 
@@ -538,6 +718,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (_sessionId == null && _messages.isEmpty) {
         _sessionId = result.sessionId;
         await _loadHistory();
+        _maybeOfferSmartActions(result);
       } else {
         final ScanAction? action = await showScanResultSheet(
           context,
@@ -584,10 +765,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     return 'image/jpeg';
   }
 
-  /// Pick a PDF or .docx, run it through vision-ingest, then mirror
-  /// [_scanIntoChat]'s behavior — adopt the chat if it's empty, otherwise
-  /// surface the scan result sheet so the learner can branch into a fresh
-  /// chat or drop the extracted text in here as a draft.
+  /// Pick PDF/DOCX file(s) and route by count, mirroring [_scanIntoChat].
+  /// `allowMultiple: true` so a learner with three worksheet PDFs can grab
+  /// them in one go.
   Future<void> _scanFileIntoChat() async {
     if (_scanning || _sending) return;
     HapticFeedback.lightImpact();
@@ -598,7 +778,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         type: FileType.custom,
         allowedExtensions: const <String>['pdf', 'docx'],
         withData: true,
-        allowMultiple: false,
+        allowMultiple: true,
       );
     } catch (e) {
       if (!mounted) return;
@@ -613,30 +793,65 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
     if (result == null || result.files.isEmpty) return;
 
-    final PlatformFile file = result.files.first;
-    final Uint8List? bytes = file.bytes;
-    if (bytes == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Couldn\'t read the file.')),
-      );
-      return;
-    }
-    // Mirror AddMaterialSheet's cap so the request stays under the Edge
-    // Function payload budget.
-    const int maxBytes = 25 * 1024 * 1024;
-    if (bytes.lengthInBytes > maxBytes) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'That file is over 25 MB. Try a smaller one or upload via the subject workspace.',
-          ),
-        ),
-      );
-      return;
-    }
+    // file_picker has no built-in count cap, so trim to the batch limit
+    // before validating.
+    final bool trimmed = result.files.length > _maxBatchFiles;
+    final List<PlatformFile> picked =
+        trimmed ? result.files.sublist(0, _maxBatchFiles) : result.files;
 
+    // Validate each file up-front (size + readable bytes) so we don't
+    // get half-way through a 5-file batch before realising one is bad.
+    final List<PlatformFile> ok = <PlatformFile>[];
+    final List<String> rejected = <String>[];
+    for (final PlatformFile f in picked) {
+      if (f.bytes == null) {
+        rejected.add('${f.name} (unreadable)');
+        continue;
+      }
+      if (f.bytes!.lengthInBytes > _maxAttachmentBytes) {
+        rejected.add('${f.name} (>25 MB)');
+        continue;
+      }
+      ok.add(f);
+    }
+    if (mounted && (trimmed || rejected.isNotEmpty)) {
+      final List<String> notes = <String>[
+        if (trimmed) 'Added the first $_maxBatchFiles — that\'s the limit per batch.',
+        if (rejected.isNotEmpty) 'Skipped: ${rejected.join(', ')}',
+      ];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(notes.join(' '))),
+      );
+    }
+    if (ok.isEmpty) return;
+
+    if (ok.length == 1) {
+      await _processSingleFile(ok.first);
+    } else {
+      final List<_PendingScan> scans = <_PendingScan>[];
+      for (final PlatformFile f in ok) {
+        final bool isDocx = f.name.toLowerCase().endsWith('.docx');
+        scans.add(_PendingScan(
+          name: f.name,
+          process: () => isDocx
+              ? ref.read(visionServiceProvider).analyzeDocx(
+                    bytes: f.bytes!,
+                    name: f.name,
+                    subjectId: widget.subjectId,
+                  )
+              : ref.read(visionServiceProvider).analyzePdf(
+                    bytes: f.bytes!,
+                    name: f.name,
+                    subjectId: widget.subjectId,
+                  ),
+        ));
+      }
+      await _processBatchScans(scans);
+    }
+  }
+
+  Future<void> _processSingleFile(PlatformFile file) async {
+    final Uint8List bytes = file.bytes!;
     final bool isDocx = file.name.toLowerCase().endsWith('.docx');
 
     setState(() => _scanning = true);
@@ -657,6 +872,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (_sessionId == null && _messages.isEmpty) {
         _sessionId = sr.sessionId;
         await _loadHistory();
+        _maybeOfferSmartActions(sr);
       } else {
         final ScanAction? action = await showScanResultSheet(
           context,
@@ -693,9 +909,121 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
   }
 
+  /// Batch processor for 2+ attachments. Runs vision-ingest sequentially
+  /// (parallel would hammer the Edge function and risk per-user rate
+  /// limits), tracks progress for the overlay, and stashes the combined
+  /// extracted text as a pending attachment that gets prepended to the
+  /// next outgoing message.
+  ///
+  /// We deliberately skip the session-adoption / scan-result-sheet path
+  /// the single-file flow uses — multi-file is the "I just want this
+  /// done" gesture, so the destination is always *this* chat, never a
+  /// branched session.
+  Future<void> _processBatchScans(List<_PendingScan> scans) async {
+    setState(() {
+      _scanning = true;
+      _batchTotal = scans.length;
+      _batchProgress = 0;
+    });
+
+    final List<_BatchResult> processed = <_BatchResult>[];
+    final List<String> failed = <String>[];
+
+    try {
+      for (int i = 0; i < scans.length; i++) {
+        final _PendingScan s = scans[i];
+        if (mounted) setState(() => _batchProgress = i + 1);
+        try {
+          final ScanResult sr = await s.process();
+          if (sr.extractedText.trim().isEmpty) {
+            failed.add(s.name);
+          } else {
+            processed.add(_BatchResult(
+              name: s.name,
+              extractedText: sr.extractedText.trim(),
+            ));
+          }
+        } catch (_) {
+          failed.add(s.name);
+        }
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _batchTotal = 0;
+          _batchProgress = 0;
+        });
+      }
+    }
+
+    if (!mounted) return;
+
+    if (processed.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't read any of those files. Try again?"),
+        ),
+      );
+      return;
+    }
+
+    // Build the combined attachment block. Each doc is fenced with its
+    // filename so Yve can address questions per-document if the learner
+    // asks (e.g. "answer page 2 of worksheet2.pdf").
+    final StringBuffer buf = StringBuffer();
+    buf.write(
+      processed.length == 1
+          ? 'Attached document:\n\n'
+          : 'Attached ${processed.length} documents:\n\n',
+    );
+    for (int i = 0; i < processed.length; i++) {
+      final _BatchResult r = processed[i];
+      buf.writeln('--- ${r.name} ---');
+      buf.writeln(r.extractedText);
+      if (i < processed.length - 1) buf.writeln();
+    }
+
+    setState(() {
+      _pendingAttachmentText = buf.toString().trimRight();
+      _pendingAttachmentNames =
+          processed.map((_BatchResult r) => r.name).toList();
+      // Surface the assignment smart actions so the most common next
+      // step ("solve all") is one tap away. Only meaningful in
+      // Assignment mode; cleared on first send like the single-file
+      // path.
+      if (_mode == StudyMode.assignment) {
+        _smartActions = const <_SmartAction>[
+          _SmartAction(
+            label: 'Solve all questions',
+            prompt:
+                'Solve every question in these documents, organized by document and section. Answer all of them in full — short answers, true/false, multiple choice, scenarios, everything. Don\'t summarize and stop; work through everything.',
+            filled: true,
+          ),
+          _SmartAction(
+            label: 'Section by section',
+            prompt:
+                'Walk me through these documents one section at a time. Solve the first section in full, then pause and let me say "next" before continuing.',
+          ),
+          _SmartAction(
+            label: 'Explain concepts first',
+            prompt:
+                'Before solving, give me a clear explanation of the key concepts these documents cover. Then we can work through the questions together.',
+          ),
+        ];
+      }
+    });
+
+    if (failed.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Couldn't read: ${failed.join(', ')}")),
+      );
+    }
+  }
+
   Future<void> _saveCurrentExchange({required String? suggested}) async {
     final List<Subject> subjectList =
-        ref.read(subjectsProvider).value ?? const <Subject>[];
+        ref.read(subjectsProvider).valueOrNull ?? const <Subject>[];
     final Subject? selected = await showSaveToSubjectSheet(
       context,
       subjects: subjectList,
@@ -720,7 +1048,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         children: <Widget>[
           _buildChatColumn(saveSuggestion, lastYve),
           if (_scanning)
-            const Positioned.fill(child: YveReadingOverlay()),
+            Positioned.fill(
+              child: YveReadingOverlay(
+                message: _batchTotal > 1
+                    ? 'Yve is reading $_batchProgress of $_batchTotal…'
+                    : 'Yve is reading your scan…',
+              ),
+            ),
         ],
       ),
     );
@@ -763,7 +1097,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 setState(() {
                   final int idx = _messages.indexOf(lastYve);
                   _messages[idx] = lastYve.copyWith(
-                    saveToSubjectSuggestion: null,
+                    clearSaveToSubjectSuggestion: true,
                   );
                 });
               },
@@ -772,7 +1106,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             child: _loadingHistory
                 ? const Center(child: CircularProgressIndicator())
                 : (_messages.isEmpty && _quotaHit == null)
-                    ? _EmptyChat(mode: _mode)
+                    ? _EmptyChat(
+                        mode: _mode,
+                        // Assignment mode surfaces the attach CTAs in its
+                        // empty state — the same handlers the paperclip
+                        // uses. Other modes ignore these and show the
+                        // minimal icon+tagline.
+                        onCamera: () => _scanIntoChat(ImageSource.camera),
+                        onGallery: () => _scanIntoChat(ImageSource.gallery),
+                        onFile: _scanFileIntoChat,
+                      )
                     : ListView.builder(
                         controller: _scroll,
                         padding: const EdgeInsets.all(YveSpacing.lg),
@@ -797,10 +1140,38 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         },
                       ),
           ),
+          if (_pendingAttachmentNames.isNotEmpty)
+            _PendingAttachmentPill(
+              names: _pendingAttachmentNames,
+              onClear: () {
+                setState(() {
+                  _pendingAttachmentText = null;
+                  _pendingAttachmentNames = const <String>[];
+                });
+              },
+            ),
+          if (_smartActions != null && _smartActions!.isNotEmpty)
+            _SmartActionsBar(
+              actions: _smartActions!,
+              onTap: (_SmartAction a) => _send(a.prompt),
+            ),
           _InputBar(
             controller: _input,
             sending: _sending || _scanning,
             listening: _listening,
+            // When an anonymous user hits the lifetime cap, lock the
+            // entire input so they can't keep typing/sending into a
+            // wall. The QuotaExceededCard above the input is the only
+            // path forward — sign in. Tapping the disabled input
+            // re-shows the continuation panel so the user isn't lost.
+            blocked: _quotaHit?.kind == CapKind.anonymousLimit,
+            onBlockedTap: () => showAnonymousContinuation(
+              context,
+              title: 'Save your work to Yve',
+              body: 'You\'ve finished your first assignment with Yve. '
+                  'Create a free account to keep going, save what you '
+                  'have, and pick up where you left off tomorrow.',
+            ),
             onSend: () => _send(),
             onMic: _toggleVoiceInput,
             onAttach: () {
@@ -1047,11 +1418,34 @@ class _HandsFreeBanner extends StatelessWidget {
 }
 
 class _EmptyChat extends StatelessWidget {
-  const _EmptyChat({required this.mode});
+  const _EmptyChat({
+    required this.mode,
+    this.onCamera,
+    this.onGallery,
+    this.onFile,
+  });
   final StudyMode mode;
+
+  /// Attach handlers — only surfaced in Assignment mode where the
+  /// "how do I even use this?" question has a concrete answer.
+  /// Null for other modes (and they don't render the buttons).
+  final VoidCallback? onCamera;
+  final VoidCallback? onGallery;
+  final VoidCallback? onFile;
 
   @override
   Widget build(BuildContext context) {
+    if (mode == StudyMode.assignment &&
+        onCamera != null &&
+        onGallery != null &&
+        onFile != null) {
+      return _AssignmentEmptyState(
+        onCamera: onCamera!,
+        onGallery: onGallery!,
+        onFile: onFile!,
+      );
+    }
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(YveSpacing.xxxl),
@@ -1090,6 +1484,200 @@ class _EmptyChat extends StatelessWidget {
   }
 }
 
+/// Assignment-specific landing — three big attach CTAs because the most
+/// common first move in this mode is "snap my worksheet", not "type a
+/// question". The paperclip in the input bar still works; this just
+/// stops requiring the learner to discover it.
+class _AssignmentEmptyState extends StatelessWidget {
+  const _AssignmentEmptyState({
+    required this.onCamera,
+    required this.onGallery,
+    required this.onFile,
+  });
+
+  final VoidCallback onCamera;
+  final VoidCallback onGallery;
+  final VoidCallback onFile;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(
+          YveSpacing.xl,
+          YveSpacing.xxl,
+          YveSpacing.xl,
+          YveSpacing.xl,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Center(
+              child: Container(
+                width: 64,
+                height: 64,
+                decoration: const BoxDecoration(
+                  gradient: YveColors.brandGradient,
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(
+                    Icons.edit_note_rounded,
+                    size: 30,
+                    color: YveColors.textInverse,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: YveSpacing.md),
+            Text(
+              'Solve your assignment',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Snap a photo, upload a file, or paste your question — Yve will work through it.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: YveColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: YveSpacing.xl),
+            _AttachCta(
+              icon: Icons.camera_alt_rounded,
+              label: 'Take a photo',
+              hint: 'Snap your worksheet or notes',
+              onTap: onCamera,
+              filled: true,
+            ),
+            const SizedBox(height: YveSpacing.sm),
+            _AttachCta(
+              icon: Icons.photo_library_rounded,
+              label: 'Pick from gallery',
+              hint: 'Up to 5 photos',
+              onTap: onGallery,
+            ),
+            const SizedBox(height: YveSpacing.sm),
+            _AttachCta(
+              icon: Icons.upload_file_rounded,
+              label: 'Upload PDF or Doc',
+              hint: 'Up to 5 files',
+              onTap: onFile,
+            ),
+            const SizedBox(height: YveSpacing.lg),
+            const Center(
+              child: Text(
+                'Or just type your question below.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: YveColors.textTertiary,
+                  height: 1.4,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AttachCta extends StatelessWidget {
+  const _AttachCta({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String hint;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color background = filled ? YveColors.primary : YveColors.surface;
+    final Color foreground =
+        filled ? YveColors.textInverse : YveColors.textPrimary;
+    final Color iconBackground =
+        filled ? const Color(0x33FFFFFF) : YveColors.primarySurface;
+    final Color iconColor = filled ? YveColors.textInverse : YveColors.primary;
+    final Color hintColor = filled
+        ? YveColors.textOnGradient
+        : YveColors.textSecondary;
+
+    return Material(
+      color: background,
+      borderRadius: YveSpacing.cardRadius,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: YveSpacing.cardRadius,
+        child: Container(
+          padding: const EdgeInsets.all(YveSpacing.lg),
+          decoration: BoxDecoration(
+            borderRadius: YveSpacing.cardRadius,
+            border: filled
+                ? null
+                : Border.all(color: YveColors.border, width: 1),
+            boxShadow: filled ? null : YveSpacing.cardShadow,
+            color: background,
+          ),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: iconColor, size: 22),
+              ),
+              const SizedBox(width: YveSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: foreground,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hint,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: hintColor,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_rounded,
+                color: foreground.withValues(alpha: 0.7),
+                size: 18,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.message,
@@ -1114,29 +1702,50 @@ class _Bubble extends StatelessWidget {
       return Container(
         margin: const EdgeInsets.only(bottom: YveSpacing.lg),
         alignment: Alignment.centerRight,
-        child: Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: YveSpacing.lg,
-            vertical: 12,
-          ),
-          constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.8,
-          ),
-          decoration: const BoxDecoration(
-            color: YveColors.primary,
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(18),
-              topRight: Radius.circular(18),
-              bottomLeft: Radius.circular(18),
-              bottomRight: Radius.circular(4),
+        child: GestureDetector(
+          // Long-press anywhere on the user's own bubble to copy.
+          // Matches the WhatsApp / iMessage pattern — users expect to
+          // be able to reuse their own prompts.
+          onLongPress: () async {
+            await Clipboard.setData(ClipboardData(text: message.text));
+            HapticFeedback.selectionClick();
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Copied'),
+                duration: Duration(seconds: 1),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: YveSpacing.lg,
+              vertical: 12,
             ),
-          ),
-          child: Text(
-            message.text,
-            style: const TextStyle(
-              color: YveColors.textInverse,
-              fontSize: 14,
-              height: 1.5,
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.8,
+            ),
+            decoration: const BoxDecoration(
+              color: YveColors.primary,
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(18),
+                topRight: Radius.circular(18),
+                bottomLeft: Radius.circular(18),
+                bottomRight: Radius.circular(4),
+              ),
+            ),
+            // SelectableText so users can also drag-select part of their
+            // own message (eg to copy just one sentence from a long
+            // prompt). The selection handles use the brand accent.
+            child: SelectableText(
+              message.text,
+              style: const TextStyle(
+                color: YveColors.textInverse,
+                fontSize: 14,
+                height: 1.5,
+              ),
+              selectionControls: MaterialTextSelectionControls(),
             ),
           ),
         ),
@@ -1440,7 +2049,7 @@ class _StreamingText extends StatelessWidget {
         ],
       );
     }
-    return MarkdownBody(
+    return YveMarkdownBody(
       data: text,
       selectable: true,
       onTapLink: (String _, String? href, String __) async {
@@ -1479,17 +2088,31 @@ MarkdownStyleSheet _yveMarkdownStyle(BuildContext context) {
       ),
     ),
     blockquotePadding: const EdgeInsets.only(left: 12),
+    // Inline code style — used for short algebra expressions Yve drops
+    // into prose (`x^2 + 3x`). Darker text + a tiny baseline shift via
+    // letterSpacing makes the block read as definitive rather than
+    // ambient. The flutter_markdown styleSheet doesn't support padding
+    // on the inline `code` background, so we boost the contrast and
+    // size to give the block visual weight.
     code: const TextStyle(
       fontFamily: 'monospace',
-      fontSize: 13,
-      color: YveColors.primary,
+      fontSize: 13.5,
+      fontWeight: FontWeight.w600,
+      color: YveColors.textPrimary,
       backgroundColor: YveColors.primarySurface,
+      letterSpacing: 0.2,
     ),
+    // Display code blocks (```...```) — bigger, with a softer left
+    // border so they read as "examined material" rather than just
+    // shaded text.
     codeblockDecoration: BoxDecoration(
       color: YveColors.surface2,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
+      border: const Border(
+        left: BorderSide(color: YveColors.accent, width: 3),
+      ),
     ),
-    codeblockPadding: const EdgeInsets.all(10),
+    codeblockPadding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
     a: body.copyWith(
       color: YveColors.primary,
       decoration: TextDecoration.underline,
@@ -1540,11 +2163,180 @@ class _BlinkingCaretState extends State<_BlinkingCaret>
   }
 }
 
+/// Smart-action chip strip surfaced above the input after a worksheet
+/// upload in Assignment mode. Single tap → sends an explicit intent to
+/// Yve so the learner doesn't have to type "answer all questions" to
+/// get the assignment solved end-to-end.
+class _SmartAction {
+  const _SmartAction({
+    required this.label,
+    required this.prompt,
+    this.filled = false,
+  });
+
+  final String label;
+  final String prompt;
+  final bool filled;
+}
+
+/// A scan job queued for batch processing — image or PDF, doesn't matter
+/// here. [process] kicks off the vision-ingest call when the batch
+/// helper is ready to run it.
+class _PendingScan {
+  const _PendingScan({required this.name, required this.process});
+  final String name;
+  final Future<ScanResult> Function() process;
+}
+
+/// One successfully-processed scan in a batch. We only need the
+/// extracted text — the rest of ScanResult (sessionId, action ladder,
+/// etc.) isn't used in the multi-file path because batch attaches
+/// don't adopt vision-ingest sessions.
+class _BatchResult {
+  const _BatchResult({required this.name, required this.extractedText});
+  final String name;
+  final String extractedText;
+}
+
+/// Pill shown above the input bar when a batch attach has stashed
+/// extracted text waiting to be sent. Tells the learner what's queued,
+/// lets them throw it out if they changed their mind.
+class _PendingAttachmentPill extends StatelessWidget {
+  const _PendingAttachmentPill({
+    required this.names,
+    required this.onClear,
+  });
+
+  final List<String> names;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final String summary = names.length == 1
+        ? names.first
+        : '${names.length} documents — ${names.first}'
+            '${names.length > 1 ? ', …' : ''}';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(
+        YveSpacing.lg,
+        YveSpacing.sm,
+        YveSpacing.lg,
+        0,
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: YveSpacing.md,
+        vertical: 8,
+      ),
+      decoration: BoxDecoration(
+        color: YveColors.primarySurface,
+        borderRadius: YveSpacing.pillRadius,
+        border: Border.all(color: YveColors.border, width: 1),
+      ),
+      child: Row(
+        children: <Widget>[
+          const Icon(
+            Icons.attach_file_rounded,
+            size: 16,
+            color: YveColors.primary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              summary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: YveColors.primary,
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: onClear,
+            borderRadius: BorderRadius.circular(6),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Icon(
+                Icons.close_rounded,
+                size: 14,
+                color: YveColors.textSecondary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SmartActionsBar extends StatelessWidget {
+  const _SmartActionsBar({
+    required this.actions,
+    required this.onTap,
+  });
+
+  final List<_SmartAction> actions;
+  final void Function(_SmartAction) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(
+        YveSpacing.lg,
+        YveSpacing.sm,
+        YveSpacing.lg,
+        YveSpacing.sm,
+      ),
+      decoration: const BoxDecoration(
+        border: Border(
+          top: BorderSide(color: YveColors.borderSubtle, width: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Padding(
+            padding: EdgeInsets.only(left: 2, bottom: 6),
+            child: Text(
+              'How should Yve handle this?',
+              style: TextStyle(
+                fontSize: 12,
+                color: YveColors.textSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: actions.length,
+              separatorBuilder: (_, __) =>
+                  const SizedBox(width: YveSpacing.sm),
+              itemBuilder: (BuildContext context, int i) {
+                final _SmartAction a = actions[i];
+                return YvePill(
+                  label: a.label,
+                  filled: a.filled,
+                  onTap: () => onTap(a),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _InputBar extends StatelessWidget {
   const _InputBar({
     required this.controller,
     required this.sending,
     required this.listening,
+    required this.blocked,
+    required this.onBlockedTap,
     required this.onSend,
     required this.onMic,
     required this.onAttach,
@@ -1553,12 +2345,25 @@ class _InputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool sending;
   final bool listening;
+
+  /// True when the user has hit a hard cap that can't be cleared by
+  /// retrying (anonymous-lifetime limit, primarily). Disables typing,
+  /// mic, and send — only the attach button (which routes through
+  /// runIfAuthed and will also gate) and a tap-to-explain handler stay
+  /// active. The QuotaExceededCard rendered above the input has the
+  /// recovery CTA.
+  final bool blocked;
+  final VoidCallback onBlockedTap;
+
   final VoidCallback onSend;
   final VoidCallback onMic;
   final VoidCallback onAttach;
 
   @override
   Widget build(BuildContext context) {
+    final String hint = blocked
+        ? 'Sign in to keep going'
+        : (listening ? 'Listening…' : 'Ask Yve anything…');
     return Container(
       decoration: const BoxDecoration(
         color: YveColors.surface,
@@ -1578,23 +2383,48 @@ class _InputBar extends StatelessWidget {
           Expanded(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 140),
-              child: TextField(
-                controller: controller,
-                minLines: 1,
-                maxLines: 5,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
-                decoration: InputDecoration(
-                  hintText:
-                      listening ? 'Listening…' : 'Ask Yve anything…',
-                ),
-              ),
+              child: blocked
+                  // Tap-to-gate: when the user taps the disabled-looking
+                  // input, route them to the same continuation panel
+                  // the QuotaExceededCard CTA opens. Otherwise the
+                  // visual signal ("input is dim, why?") leaves them
+                  // stuck without a path forward.
+                  ? GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onBlockedTap,
+                      child: AbsorbPointer(
+                        child: TextField(
+                          enabled: false,
+                          decoration: InputDecoration(hintText: hint),
+                        ),
+                      ),
+                    )
+                  : TextField(
+                      controller: controller,
+                      minLines: 1,
+                      maxLines: 5,
+                      // `newline` makes Enter insert a paragraph break,
+                      // letting users compose multi-paragraph questions
+                      // (mom's ask). Sending happens only via the send
+                      // button below. No `onSubmitted` — that fired
+                      // even on newline-key presses in some Android
+                      // keyboards.
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      decoration: InputDecoration(hintText: hint),
+                    ),
             ),
           ),
           const SizedBox(width: 8),
-          VoiceInputButton(listening: listening, onTap: onMic),
+          VoiceInputButton(
+            listening: listening,
+            onTap: blocked ? onBlockedTap : onMic,
+          ),
           const SizedBox(width: 8),
-          _SendButton(loading: sending, onTap: onSend),
+          _SendButton(
+            loading: sending,
+            onTap: blocked ? onBlockedTap : onSend,
+          ),
         ],
       ),
     );
