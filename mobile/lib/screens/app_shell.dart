@@ -60,6 +60,11 @@ class _AppShellState extends ConsumerState<AppShell>
               content: Text("You're on Yve Pro. Welcome aboard."),
             ),
           );
+        } else if (checkoutReturn == 'portal') {
+          // Returning from the Customer Portal — the plan may have
+          // changed (cancel, switch tier, resume). Refresh silently; no
+          // toast, since we don't know which way it went.
+          ref.read(entitlementProvider.notifier).refresh();
         }
         // 'cancel' just lands them back in the app silently — no toast,
         // no plan change. The marker is already stripped from the URL.

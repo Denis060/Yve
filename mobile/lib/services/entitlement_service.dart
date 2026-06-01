@@ -215,7 +215,10 @@ class EntitlementNotifier extends AsyncNotifier<Entitlement> {
     // scheme, web gets the running origin.
     final String resolvedReturn = returnUrl ??
         (kIsWeb
-            ? '${Uri.base.origin}/billing'
+            // Was '/billing' — a page that doesn't exist, so Stripe's
+            // "return to merchant" 404'd. Use the real portal return page,
+            // which bounces back into the SPA.
+            ? '${Uri.base.origin}/upgrade/portal'
             : 'https://app.getyve.com/checkout/portal');
     final String url = await ref
         .read(entitlementRepositoryProvider)

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>All set — returning to Yve</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #1B4332; color: #fff; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; box-sizing: border-box; }
+  .mark { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0; }
+  p { font-size: 14px; opacity: .85; margin: 0; max-width: 360px; line-height: 1.55; }
+  .btn { display: inline-block; margin-top: 8px; padding: 12px 24px; background: #fff; color: #1B4332; border-radius: 999px; font-weight: 700; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="center">
+  <div class="mark">&#10022;</div>
+  <h1>All set</h1>
+  <p>Returning you to Yve. Any plan changes will appear in a moment.</p>
+  <a class="btn" id="open-app" href="/">Continue to Yve</a>
+</div>
+<script>
+(function () {
+  if (/Android/i.test(navigator.userAgent || '')) {
+    var intentUrl = 'intent://app.getyve.com/checkout/portal#Intent;scheme=https;package=io.getyve.yve;' +
+      'S.browser_fallback_url=' + encodeURIComponent('io.getyve.yve://checkout/portal') + ';end';
+    try { window.location.replace(intentUrl); } catch (e) {}
+    return;
+  }
+  setTimeout(function () { window.location.href = '/?checkout=portal'; }, 1800);
+})();
+</script>
+</body>
+</html>
