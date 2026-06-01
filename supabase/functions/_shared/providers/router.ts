@@ -50,9 +50,9 @@ const DEFAULTS: Record<TaskType, { provider: ProviderName; model: string }> = {
   'vision':         { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   // PDF text extraction. No reasoning needed; pure transcription.
   'pdf-extract':    { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
-  // Write-mode polish. Sonnet because voice preservation requires nuance.
-  // (Probing — temporarily on Haiku to isolate a Sonnet-via-Edge hang.)
-  'polish':         { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  // Write-mode polish + humanize. Sonnet because voice preservation and
+  // meaning-locked rewriting both require nuance Haiku can't match.
+  'polish':         { provider: 'anthropic', model: 'claude-sonnet-4-6' },
   // Background structured summary — Haiku is fine.
   'recap':          { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
   // Background pattern observation — Haiku is fine.

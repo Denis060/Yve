@@ -323,7 +323,10 @@ Deno.serve(async (req) => {
       confidence_signal: 'unknown' as const,
     };
 
-    void persistTurn({
+    // Awaited: this is fire-once and the isolate terminates as soon as we
+    // return the response below. A bare `void` here races the DB write
+    // against isolate shutdown and silently drops persisted turns.
+    await persistTurn({
       client,
       sessionId: session.id,
       userId: user.id,
@@ -587,7 +590,10 @@ Deno.serve(async (req) => {
         // Always increment so the fair-use ceiling applies on paid tiers
         // and so usage_events captures complete telemetry.
         void incrementChatTurns(client, user.id);
-        void persistTurn({
+        // Awaited before `done` + controller.close() below: a bare `void`
+        // races the DB write against isolate shutdown and silently drops
+        // the persisted turn (user sees the reply, reload loses it).
+        await persistTurn({
           client,
           sessionId: session.id,
           userId: user.id,
