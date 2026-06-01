@@ -45,6 +45,7 @@ import type {
 import {
   LearnerProfile,
   METADATA_TOOL,
+  HUMANIZE_SYSTEM_PROMPT,
   metadataSystemPrompt,
   ModeName,
   POLISH_SYSTEM_PROMPT,
@@ -127,6 +128,20 @@ Deno.serve(async (req) => {
     typeof payload.session_id === 'string' && payload.session_id.length > 0
       ? (payload.session_id as string)
       : undefined;
+  // Write-mode sub-action. 'polish' (default) gently improves the learner's
+  // own draft; 'humanize' rewrites likely-AI text to read human while
+  // preserving meaning. Only meaningful when mode === 'write'.
+  const writeIntent: 'polish' | 'humanize' =
+    payload.intent === 'humanize' ? 'humanize' : 'polish';
+  // BCP-47 device locale ("es", "es-MX", "fr-FR"…). The shared
+  // `buildLocaleAddendum` normalises this to the primary subtag and only
+  // emits a system-prompt line for languages we trust Claude to produce
+  // idiomatic learner-grade output in. Unknown / English locales pass
+  // through silently so the persona stays unchanged.
+  const locale =
+    typeof payload.locale === 'string' && payload.locale.length > 0
+      ? (payload.locale as string)
+      : undefined;
 
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -151,7 +166,16 @@ Deno.serve(async (req) => {
   if (mode === 'write') {
     const lastUser = incoming[incoming.length - 1];
 
-    const entitlement = await loadEntitlement(client, user.id);
+    const entitlement = await loadEntitlement(
+      client,
+      user.id,
+      user.is_anonymous === true,
+    );
+
+    // Anonymous users get a special cap kind so the client routes to
+    // the AnonymousContinuationPanel (save-your-work framing) instead
+    // of the regular cap-hit pricing card. Everything else identical.
+    const isAnonymous = entitlement.planCode === 'anonymous';
 
     // 1) Word cap — cheapest check, no DB round-trip needed.
     const draftText = lastUser.content;
@@ -163,7 +187,7 @@ Deno.serve(async (req) => {
       return ndjsonResponse([
         {
           type: 'quota_exceeded',
-          kind: 'word',
+          kind: isAnonymous ? 'anonymous_limit' : 'word',
           plan: entitlement.planCode,
           used: draftWords,
           limit: entitlement.caps.polishMaxWords,
@@ -173,8 +197,14 @@ Deno.serve(async (req) => {
       ]);
     }
 
-    // 2) Polish-run cap (weekly on Free, daily on Trial, unlimited on Pro).
-    const polishQuota = await loadPolishQuota(client, user.id, entitlement.caps);
+    // 2) Polish-run cap (weekly on Free, daily on Trial, lifetime on
+    // anonymous, unlimited on Pro).
+    const polishQuota = await loadPolishQuota(
+      client,
+      user.id,
+      entitlement.caps,
+      entitlement.planCode,
+    );
     if (polishQuota.exceeded) {
       await logUsageEvent(user.id, 'polish_cap_hit', {
         reason: 'run_cap', used: polishQuota.used, limit: polishQuota.limit,
@@ -182,7 +212,7 @@ Deno.serve(async (req) => {
       return ndjsonResponse([
         {
           type: 'quota_exceeded',
-          kind: 'polish',
+          kind: isAnonymous ? 'anonymous_limit' : 'polish',
           plan: entitlement.planCode,
           used: polishQuota.used,
           limit: polishQuota.limit,
@@ -222,7 +252,9 @@ Deno.serve(async (req) => {
     try {
       polishResult = await polishRoute.provider.complete(
         {
-          systemPrompt: POLISH_SYSTEM_PROMPT,
+          systemPrompt: writeIntent === 'humanize'
+            ? HUMANIZE_SYSTEM_PROMPT
+            : POLISH_SYSTEM_PROMPT,
           messages,
           tools: [{
             name: POLISH_TOOL.name,
@@ -281,7 +313,9 @@ Deno.serve(async (req) => {
         payload: label,
       }));
     const metadata = {
-      concept_tags: ['writing voice'],
+      concept_tags: writeIntent === 'humanize'
+        ? ['humanized writing']
+        : ['writing voice'],
       post_solve_offer: { suggestions: offerSuggestions },
       confidence_signal: 'unknown' as const,
     };
@@ -332,8 +366,17 @@ Deno.serve(async (req) => {
       try {
         const lastUser = incoming[incoming.length - 1];
 
-        const entitlement = await loadEntitlement(client, user.id);
-        const quota = await loadChatQuota(client, user.id, entitlement.caps);
+        const entitlement = await loadEntitlement(
+      client,
+      user.id,
+      user.is_anonymous === true,
+    );
+        const quota = await loadChatQuota(
+          client,
+          user.id,
+          entitlement.caps,
+          entitlement.planCode,
+        );
         if (quota.exceeded) {
           await logUsageEvent(user.id, 'chat_cap_hit', {
             used: quota.used, limit: quota.limit,
@@ -345,7 +388,10 @@ Deno.serve(async (req) => {
           const ctx = await loadSessionContext(client, user.id, sessionIdIn);
           send({
             type: 'quota_exceeded',
-            kind: 'chat',
+            // Anonymous users get a different cap kind so the client
+            // shows the AnonymousContinuationPanel (save-your-work)
+            // instead of the regular trial-CTA pricing card.
+            kind: entitlement.planCode === 'anonymous' ? 'anonymous_limit' : 'chat',
             plan: entitlement.planCode,
             used: quota.used,
             limit: quota.limit,
@@ -408,7 +454,7 @@ Deno.serve(async (req) => {
           userPlan: entitlement.planCode,
         });
         const systemPrompt =
-          systemPromptFor(mode, profile) + materialsPrompt;
+          systemPromptFor(mode, profile, locale) + materialsPrompt;
 
         let answer = '';
         let chatObs:
@@ -424,12 +470,20 @@ Deno.serve(async (req) => {
           | null = null;
         let streamErrored = false;
 
+        // Assignment mode often answers multi-section worksheets/PDFs
+        // (5–10 pages, dozens of questions) — 2048 tokens truncates the
+        // model mid-response and the learner sees only the first few
+        // sections. 8192 matches what vision-ingest already uses for
+        // PDF analysis and gives the deliverable room to breathe.
+        // Other modes (open/learn/practice/materials) finish well under
+        // 2048 and don't need the higher cap.
+        const chatMaxTokens = mode === 'assignment' ? 8192 : 2048;
         for await (
           const evt of chatRoute.provider.stream(
             {
               systemPrompt,
               messages,
-              maxTokens: 2048,
+              maxTokens: chatMaxTokens,
             },
             chatRoute.model,
           )
@@ -485,7 +539,7 @@ Deno.serve(async (req) => {
         try {
           const metaResult = await metaRoute.provider.complete(
             {
-              systemPrompt: metadataSystemPrompt(mode),
+              systemPrompt: metadataSystemPrompt(mode, locale),
               messages: [
                 ...messages,
                 { role: 'assistant', content: answer },

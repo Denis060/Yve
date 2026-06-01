@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -27,6 +28,9 @@ class AiService {
     required List<ChatMessage> history,
     String? subjectId,
     String? sessionId,
+    // Write-mode sub-action: 'polish' (default) or 'humanize'. Ignored by
+    // the server for every other mode.
+    String? writeIntent,
   }) async* {
     final List<Map<String, String>> messages = history
         .map((ChatMessage m) => <String, String>{
@@ -44,11 +48,21 @@ class AiService {
     req.headers['apikey'] = Env.supabaseAnonKey;
     req.headers['content-type'] = 'application/json';
     req.headers['accept'] = 'application/x-ndjson';
+    // Device locale (BCP-47, e.g. "es-MX") so Yve can answer in the
+    // learner's language without a UI toggle. The server only acts on a
+    // small allow-list of language codes and falls back to English silently
+    // for everything else — so this is safe to send unconditionally.
+    final String locale =
+        ui.PlatformDispatcher.instance.locale.toLanguageTag();
+
     req.body = jsonEncode(<String, dynamic>{
       'mode': mode.wireName,
       'messages': messages,
+      'locale': locale,
       if (subjectId != null) 'subject_id': subjectId,
       if (sessionId != null) 'session_id': sessionId,
+      if (mode == StudyMode.write && writeIntent != null)
+        'intent': writeIntent,
     });
 
     http.StreamedResponse resp;

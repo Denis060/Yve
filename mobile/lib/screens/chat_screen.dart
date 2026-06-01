@@ -127,6 +127,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   late StudyMode _mode = widget.initialMode;
   String? _sessionId;
 
+  /// Write-mode sub-action. 'polish' improves the learner's own draft;
+  /// 'humanize' rewrites likely-AI text to read human while keeping the
+  /// meaning. Only surfaced/used when [_mode] is [StudyMode.write].
+  String _writeIntent = 'polish';
+
   /// Smart actions surfaced right after a multi-question worksheet
   /// upload in Assignment mode. The learner came here to get the work
   /// solved — these chips capture intent in one tap instead of forcing
@@ -421,6 +426,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           history: _messages.sublist(0, _messages.length - 1),
           subjectId: widget.subjectId,
           sessionId: _sessionId,
+          writeIntent: _mode == StudyMode.write ? _writeIntent : null,
         );
 
     final Completer<void> completer = Completer<void>();
@@ -1155,6 +1161,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               actions: _smartActions!,
               onTap: (_SmartAction a) => _send(a.prompt),
             ),
+          // Write mode exposes a Polish/Humanize switch right above the
+          // input so the learner picks the action before sending. Hidden
+          // in every other mode.
+          if (_mode == StudyMode.write && _quotaHit == null)
+            _WriteIntentToggle(
+              intent: _writeIntent,
+              enabled: !_sending,
+              onChanged: (String next) {
+                if (next == _writeIntent) return;
+                HapticFeedback.selectionClick();
+                setState(() => _writeIntent = next);
+              },
+            ),
           _InputBar(
             controller: _input,
             sending: _sending || _scanning,
@@ -1478,6 +1497,125 @@ class _EmptyChat extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Write-mode action switch: Polish (improve the learner's own draft) vs
+/// Humanize (rewrite likely-AI text to read human, meaning preserved).
+/// Sits just above the input bar. A small caption under the segmented
+/// control states the honest detector position for the Humanize action.
+class _WriteIntentToggle extends StatelessWidget {
+  const _WriteIntentToggle({
+    required this.intent,
+    required this.onChanged,
+    required this.enabled,
+  });
+
+  final String intent;
+  final ValueChanged<String> onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isHumanize = intent == 'humanize';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(
+        YveSpacing.lg,
+        YveSpacing.sm,
+        YveSpacing.lg,
+        YveSpacing.sm,
+      ),
+      decoration: const BoxDecoration(
+        color: YveColors.surface,
+        border: Border(top: BorderSide(color: YveColors.borderSubtle)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: YveColors.surface2,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: <Widget>[
+                _segment(
+                  label: 'Polish',
+                  icon: Icons.auto_fix_high_rounded,
+                  selected: !isHumanize,
+                  onTap: enabled ? () => onChanged('polish') : null,
+                ),
+                _segment(
+                  label: 'Humanize',
+                  icon: Icons.psychology_alt_rounded,
+                  selected: isHumanize,
+                  onTap: enabled ? () => onChanged('humanize') : null,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Text(
+              isHumanize
+                  ? 'Rewrites AI text to read naturally and human while keeping your meaning. No tool can guarantee an AI detector result.'
+                  : 'Improves clarity, grammar, and flow while keeping your voice.',
+              style: const TextStyle(
+                fontSize: 11,
+                color: YveColors.textTertiary,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _segment({
+    required String label,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? YveColors.surface : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            boxShadow: selected ? YveSpacing.cardShadow : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 15,
+                color: selected ? YveColors.primary : YveColors.textSecondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: selected ? YveColors.primary : YveColors.textSecondary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
