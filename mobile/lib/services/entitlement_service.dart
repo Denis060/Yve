@@ -1,10 +1,29 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/entitlement.dart';
+
+/// Custom-scheme deep link Stripe redirects back to after Checkout on
+/// mobile. Must match an intent-filter <data> entry in AndroidManifest
+/// (and the equivalent CFBundleURLTypes entry on iOS, when wired). The
+/// `?return=...` query lets us distinguish which screen to land on if
+/// we ever want explicit routing — for now app_shell.dart just refreshes
+/// entitlement on AppLifecycleState.resumed, so either path works.
+const String _mobileCheckoutSuccess =
+    'https://app.getyve.com/checkout/success';
+const String _mobileCheckoutCancel =
+    'https://app.getyve.com/checkout/cancel';
+
+/// Web fallbacks — the in-tab Stripe Checkout returns the user to the
+/// origin so they land back on the running SPA. Server-side defaults
+/// (STRIPE_SUCCESS_URL / STRIPE_CANCEL_URL env vars) are only used if
+/// the client doesn't pass a value — which it now always does.
+String _webCheckoutSuccess() => '${Uri.base.origin}/upgrade/success';
+String _webCheckoutCancel() => '${Uri.base.origin}/upgrade/cancel';
 
 class EntitlementRepository {
   EntitlementRepository(this._client);
@@ -152,16 +171,32 @@ class EntitlementNotifier extends AsyncNotifier<Entitlement> {
     String? successUrl,
     String? cancelUrl,
   }) async {
+    // Default to platform-appropriate return URLs so the user lands back
+    // in the app instead of getting stranded on a Stripe-hosted page.
+    final String resolvedSuccess = successUrl ??
+        (kIsWeb ? _webCheckoutSuccess() : _mobileCheckoutSuccess);
+    final String resolvedCancel = cancelUrl ??
+        (kIsWeb ? _webCheckoutCancel() : _mobileCheckoutCancel);
     final CheckoutSession session = await ref
         .read(entitlementRepositoryProvider)
         .createCheckoutUrl(
           plan: plan,
-          successUrl: successUrl,
-          cancelUrl: cancelUrl,
+          successUrl: resolvedSuccess,
+          cancelUrl: resolvedCancel,
         );
     final bool ok = await launchUrl(
       Uri.parse(session.url),
-      mode: LaunchMode.externalApplication,
+      // Mobile: external in-app browser, app resumes after (app_shell
+      // refreshes entitlement on AppLifecycleState.resumed).
+      // Web: navigate the SAME tab (_self). Opening a new tab strands the
+      // user in a second app instance and the original never refreshes —
+      // web has no reliable resume signal. Same-tab means Stripe's
+      // success redirect re-enters one app, which reads ?checkout=success
+      // on load and refreshes (see main.dart bootstrap).
+      mode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
+      webOnlyWindowName: kIsWeb ? '_self' : null,
     );
     if (!ok) {
       throw EntitlementException(
@@ -175,12 +210,24 @@ class EntitlementNotifier extends AsyncNotifier<Entitlement> {
   /// card. The portal handles state changes; the webhook fires events
   /// that flow back into [refresh].
   Future<void> launchPortal({String? returnUrl}) async {
+    // Stripe Customer Portal needs a return URL to send the user back
+    // to. Same deep-link trick as Checkout — mobile gets the custom
+    // scheme, web gets the running origin.
+    final String resolvedReturn = returnUrl ??
+        (kIsWeb
+            ? '${Uri.base.origin}/billing'
+            : 'https://app.getyve.com/checkout/portal');
     final String url = await ref
         .read(entitlementRepositoryProvider)
-        .createPortalUrl(returnUrl: returnUrl);
+        .createPortalUrl(returnUrl: resolvedReturn);
     final bool ok = await launchUrl(
       Uri.parse(url),
-      mode: LaunchMode.externalApplication,
+      // Same rationale as launchCheckoutFor: same-tab on web, external
+      // browser on mobile.
+      mode: kIsWeb
+          ? LaunchMode.platformDefault
+          : LaunchMode.externalApplication,
+      webOnlyWindowName: kIsWeb ? '_self' : null,
     );
     if (!ok) {
       throw EntitlementException(

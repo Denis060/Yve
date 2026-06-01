@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You're on Yve Pro!</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #1B4332; color: #fff; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 24px; text-align: center; box-sizing: border-box; }
+  .mark { width: 64px; height: 64px; border-radius: 50%; background: rgba(255,255,255,.14); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; }
+  h1 { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.3px; }
+  p { font-size: 14px; opacity: .85; margin: 0; max-width: 380px; line-height: 1.55; }
+  .btn { display: inline-block; margin-top: 8px; padding: 14px 28px; background: #fff; color: #1B4332; border-radius: 999px; font-weight: 700; text-decoration: none; font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="center">
+  <div class="mark">&#10022;</div>
+  <h1>You're on Yve Pro</h1>
+  <p>Welcome aboard. Your trial is active — enjoy unlimited chats, scans, polish, and subjects. We'll send a reminder 24 hours before your card is charged so there are no surprises.</p>
+  <a class="btn" id="open-app" href="/">Continue to Yve</a>
+</div>
+<script>
+(function () {
+  // Mobile (Android App Link path): try to re-open the installed app
+  // via intent://, fall back to custom scheme, then to the link above.
+  if (/Android/i.test(navigator.userAgent || '')) {
+    var intentUrl = 'intent://app.getyve.com/checkout/success#Intent;scheme=https;package=io.getyve.yve;' +
+      'S.browser_fallback_url=' + encodeURIComponent('io.getyve.yve://checkout/success') + ';end';
+    try { window.location.replace(intentUrl); } catch (e) {}
+    return;
+  }
+  // Web: brief celebration, then auto-route to the app where the
+  // entitlement listener will already have flipped the user to Pro.
+  setTimeout(function () { window.location.href = '/?checkout=success'; }, 2400);
+})();
+</script>
+</body>
+</html>

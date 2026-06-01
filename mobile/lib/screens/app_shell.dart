@@ -9,6 +9,11 @@ import '../services/entitlement_service.dart';
 import '../services/notifications_service.dart';
 import '../services/profile_service.dart';
 import '../services/retention_service.dart';
+// Conditional import: real impl reads the URL on web, no-op stub on
+// mobile (where Stripe return is handled via the resume lifecycle).
+import '../utils/web_url_cleanup.dart'
+    if (dart.library.js_interop) '../utils/web_url_cleanup_web.dart'
+    as web_url;
 import '../widgets/yve_bottom_nav.dart';
 import 'home_screen.dart';
 import 'profile_screen.dart';
@@ -39,6 +44,27 @@ class _AppShellState extends ConsumerState<AppShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Web: Stripe Checkout returns the user to the SAME tab with a
+    // `?checkout=success|cancel` marker (mobile uses the resume lifecycle
+    // below instead). On a success return, refresh entitlement so the
+    // plan flips without a manual tap, and confirm with a toast. On
+    // mobile this is a no-op stub.
+    final String? checkoutReturn = web_url.takeCheckoutReturnSignal();
+    if (checkoutReturn != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (checkoutReturn == 'success') {
+          ref.read(entitlementProvider.notifier).refresh();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("You're on Yve Pro. Welcome aboard."),
+            ),
+          );
+        }
+        // 'cancel' just lands them back in the app silently — no toast,
+        // no plan change. The marker is already stripped from the URL.
+      });
+    }
   }
 
   @override
@@ -58,13 +84,16 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   void _reschedule() {
-    final LearnerProfile? profile = ref.read(profileProvider).value;
+    // `.valueOrNull` is the safe accessor — `.value` in newer Riverpod
+    // *rethrows* the provider's error state, so a transient network
+    // failure during a profile fetch escapes as an unhandled exception
+    // (caught by Sentry as fatal). Captured 2026-05-19 from users with
+    // intermittent connectivity.
+    final LearnerProfile? profile = ref.read(profileProvider).valueOrNull;
     final List<ConceptReview> queue =
-        ref.read(reviewQueueProvider).value ?? const <ConceptReview>[];
+        ref.read(reviewQueueProvider).valueOrNull ?? const <ConceptReview>[];
     if (profile == null) return;
     final bool active = profile.notificationsEnabled && queue.isNotEmpty;
-    // Fire-and-forget — the schedule call is best-effort and shouldn't
-    // block rebuilds. Errors get logged inside the service.
     unawaited(
       ref
           .read(notificationsServiceProvider)
