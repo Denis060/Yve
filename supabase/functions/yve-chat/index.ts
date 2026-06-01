@@ -299,7 +299,10 @@ Deno.serve(async (req) => {
     const polishInput =
       (polishResult.toolUse?.input as Record<string, unknown>) ?? {};
     const polish: PolishPayload = {
-      polished_text: (polishInput.polished_text as string) ?? '',
+      // Strip any em-dashes the model leaked despite the prompt ban — the
+      // loudest AI tell in submitted work. Applies to both polish and
+      // humanize since neither should ever ship an em-dash.
+      polished_text: stripEmDashes((polishInput.polished_text as string) ?? ''),
       change_summary: polishInput.change_summary ?? [],
       preserved_phrases: polishInput.preserved_phrases ?? [],
       flags: polishInput.flags ?? [],
@@ -649,6 +652,30 @@ function countWords(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
   return trimmed.split(/\s+/).length;
+}
+
+/// Deterministic safety net for the anti-AI-tell rule the model most often
+/// leaks: em-dashes. Both POLISH and HUMANIZE prompts forbid them, but the
+/// model occasionally slips one in, and an em-dash is the single loudest
+/// "AI wrote this" signal in submitted text. We strip them in code so the
+/// guarantee doesn't depend on the model obeying.
+///
+/// Replacement logic mirrors the prompt guidance:
+///   "word—word"  → "word, word"   (em/en-dash used as a pause → comma)
+///   "word -- word" → "word, word" (double-hyphen variant)
+/// Spacing around the dash is normalised so we never produce double spaces
+/// or a comma glued to the previous word incorrectly.
+function stripEmDashes(text: string): string {
+  if (!text) return text;
+  return text
+    // " — " or "—" (em U+2014 / en U+2013), with optional surrounding
+    // spaces, becomes a comma + single space.
+    .replace(/\s*[—–]\s*/g, ', ')
+    // ASCII double-hyphen used as a dash: "a -- b" or "a--b".
+    .replace(/\s*--\s*/g, ', ')
+    // Guard: never leave ", ." or duplicate ", ," from edge cases.
+    .replace(/,\s*([.,;:!?])/g, '$1')
+    .replace(/,\s*,/g, ',');
 }
 
 /// First `max` characters of `text`, with an ellipsis if truncated.
