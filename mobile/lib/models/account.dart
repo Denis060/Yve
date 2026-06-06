@@ -38,4 +38,22 @@ class Account {
     }
     return email ?? 'Signed in';
   }
+
+  // Value equality so Riverpod's StreamProvider doesn't treat every
+  // re-emit as a fresh value — otherwise every Supabase auth tick
+  // (TOKEN_REFRESHED, USER_UPDATED, etc.) rebuilds every consumer of
+  // accountProvider, which in turn clobbers any focused TextField with
+  // a controller backed by an Account-derived prop.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Account &&
+          runtimeType == other.runtimeType &&
+          userId == other.userId &&
+          isAnonymous == other.isAnonymous &&
+          email == other.email &&
+          displayName == other.displayName;
+
+  @override
+  int get hashCode => Object.hash(userId, isAnonymous, email, displayName);
 }

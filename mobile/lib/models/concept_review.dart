@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
 import 'yve_response.dart';
 
 /// A row from the `concept_review_queue` view — a concept Yve thinks the
@@ -58,8 +59,16 @@ class ConceptReview {
     return ConceptReview(
       concept: row['concept'] as String,
       observations: (row['n_observations'] as int?) ?? 1,
-      lastSeenAt: DateTime.parse(row['last_seen_at'] as String),
-      nextDueAt: DateTime.parse(row['next_due_at'] as String),
+      lastSeenAt: parseTimestampOr(
+        row['last_seen_at'],
+        fallback: DateTime.now(),
+        context: 'concept_review.last_seen_at',
+      ),
+      nextDueAt: parseTimestampOr(
+        row['next_due_at'],
+        fallback: DateTime.now(),
+        context: 'concept_review.next_due_at',
+      ),
       overdueSeconds: ((row['overdue_seconds'] as num?) ?? 0).toDouble(),
       confidence:
           ConfidenceSignal.fromWire(row['current_confidence'] as String?),

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
 import 'study_mode.dart';
 
 /// A persistent Yve Chat session (chat_sessions table).
@@ -35,7 +36,11 @@ class StudySession {
       id: row['id'] as String,
       title: (row['title'] as String?) ?? 'New session',
       preview: (row['last_message_preview'] as String?) ?? '',
-      updatedAt: DateTime.parse(row['updated_at'] as String),
+      updatedAt: parseTimestampOr(
+        row['updated_at'],
+        fallback: DateTime.now(),
+        context: 'study_session.updated_at',
+      ),
       messageCount: (row['message_count'] as int?) ?? 0,
       mode: StudyMode.fromWire(row['mode'] as String?),
       subjectId: row['subject_id'] as String?,

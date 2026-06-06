@@ -51,6 +51,7 @@ import {
   type VisionActionMode,
 } from '../_shared/vision.ts';
 import { chunkText, embedTexts } from '../_shared/voyage.ts';
+import { buildLocaleAddendum } from '../_shared/yve_modes.ts';
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -112,6 +113,13 @@ Deno.serve(async (req) => {
     const subjectId: string | undefined =
       typeof payload.subject_id === 'string' && payload.subject_id.length > 0
         ? payload.subject_id
+        : undefined;
+    // BCP-47 device locale ("es-MX", "fr-FR"…). Drives the language Yve uses
+    // in one_line_summary / extracted_text formatting / suggested_actions
+    // labels — so a Spanish learner scanning a worksheet sees Spanish chips.
+    const locale: string | undefined =
+      typeof payload.locale === 'string' && payload.locale.length > 0
+        ? payload.locale
         : undefined;
 
     if (!imageB64 && !pdfB64 && !docxB64) {
@@ -187,7 +195,7 @@ Deno.serve(async (req) => {
     const visionRoute = route({ taskType: 'vision' });
     const result = await visionRoute.provider.complete(
       {
-        systemPrompt: VISION_SYSTEM_PROMPT,
+        systemPrompt: VISION_SYSTEM_PROMPT + buildLocaleAddendum(locale),
         messages: [{ role: 'user', content: contentBlocks }],
         tools: [{
           name: ANALYZE_SCAN_TOOL.name,

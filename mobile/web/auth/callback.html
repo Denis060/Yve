@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Returning to Yve…</title>
+<style>
+  html, body { margin: 0; padding: 0; min-height: 100%; background: #1B4332; color: #fff; font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .center { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; text-align: center; box-sizing: border-box; }
+  .mark { width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.12); display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; letter-spacing: -0.2px; }
+  p { font-size: 14px; opacity: .85; margin: 0; max-width: 360px; }
+  .btn-row { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; width: 100%; max-width: 320px; }
+  .btn { display: inline-block; padding: 14px 24px; background: #fff; color: #1B4332; border-radius: 999px; font-weight: 700; text-decoration: none; font-size: 15px; }
+  .btn.outline { background: transparent; color: #fff; border: 1px solid rgba(255,255,255,.4); }
+  details { margin-top: 24px; font-size: 12px; opacity: .6; max-width: 480px; word-break: break-all; }
+  details pre { white-space: pre-wrap; text-align: left; background: rgba(0,0,0,.3); padding: 10px; border-radius: 8px; font-size: 10px; }
+</style>
+</head>
+<body>
+<div class="center">
+  <div class="mark">&#10022;</div>
+  <h1>Sign-in complete</h1>
+  <p>Tap below to return to the Yve app.</p>
+  <div class="btn-row">
+    <a id="primary-link" class="btn" href="#">Open Yve (try this first)</a>
+    <a id="fallback-link" class="btn outline" href="#">Open Yve (alternate)</a>
+  </div>
+  <details>
+    <summary>What link will I open?</summary>
+    <pre id="diag"></pre>
+  </details>
+</div>
+<script>
+(function () {
+  var search = window.location.search || '';
+  var hash   = window.location.hash || '';
+
+  // Custom scheme — the legacy fallback. Yve's manifest has an
+  // intent-filter that accepts io.getyve.yve://login-callback.
+  var schemeUrl = 'io.getyve.yve://login-callback' + search + hash;
+
+  // Android `intent://` — explicit dispatch with the target package
+  // included, so even pre-verified or non-Chrome browsers route to Yve.
+  var intentUrl = 'intent://app.getyve.com/auth/callback' + search + hash +
+    '#Intent;scheme=https;package=io.getyve.yve;' +
+    'S.browser_fallback_url=' + encodeURIComponent(schemeUrl) +
+    ';end';
+
+  var isAndroid = /Android/i.test(navigator.userAgent || '');
+
+  // Primary button uses intent:// on Android (most reliable in Samsung
+  // Internet); the alternate uses the plain custom-scheme link.
+  var primary = isAndroid ? intentUrl : schemeUrl;
+  document.getElementById('primary-link').setAttribute('href', primary);
+  document.getElementById('fallback-link').setAttribute('href', schemeUrl);
+
+  // Also auto-attempt the redirect after a beat — but don't block the
+  // user from tapping the button if it fails.
+  setTimeout(function () {
+    try { window.location.href = primary; } catch (e) {}
+  }, 400);
+
+  // Diagnostic so we can see in-browser what URL is being attempted.
+  document.getElementById('diag').textContent =
+    'UA: ' + (navigator.userAgent || '(none)') + '\n\n' +
+    'Primary: ' + primary + '\n\n' +
+    'Fallback: ' + schemeUrl;
+})();
+</script>
+</body>
+</html>

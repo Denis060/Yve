@@ -189,6 +189,25 @@ AppError _fromFunctionException(sb.FunctionException e) {
         code: code,
         cause: e,
       );
+    case 'anonymous_subject_limit':
+      // Guest preview cap on subjects. UI should open the
+      // AnonymousContinuationPanel ("Keep going with Yve") rather
+      // than show a banner.
+      return AppError(
+        kind: AppErrorKind.authRequired,
+        userMessage:
+            "You've started one subject as a guest. Save your account to keep going.",
+        code: code,
+        cause: e,
+      );
+    case 'subject_limit':
+      return AppError(
+        kind: AppErrorKind.alreadySubscribed,
+        userMessage: backendError ??
+            "You're at the subjects limit for your plan. Upgrade to add more.",
+        code: code,
+        cause: e,
+      );
     case 'already_subscribed':
       return AppError(
         kind: AppErrorKind.alreadySubscribed,

@@ -6,6 +6,7 @@ import '../models/polish.dart';
 import '../models/study_mode.dart';
 import '../models/study_session.dart';
 import '../models/yve_response.dart';
+import '../utils/safe_parse.dart';
 
 class SessionsRepository {
   SessionsRepository(this._client);
@@ -47,6 +48,13 @@ class SessionsRepository {
         .order('created_at', ascending: true);
     return rows.cast<Map<String, dynamic>>().map(_messageFromRow).toList();
   }
+
+  /// Delete a chat session. The `chat_messages` rows for this session
+  /// cascade-delete via the FK constraint. Gated by the
+  /// `chat_sessions_self_delete` RLS policy.
+  Future<void> delete(String sessionId) async {
+    await _client.from('chat_sessions').delete().eq('id', sessionId);
+  }
 }
 
 ChatMessage _messageFromRow(Map<String, dynamic> row) {
@@ -67,7 +75,11 @@ ChatMessage _messageFromRow(Map<String, dynamic> row) {
     id: row['id'] as String,
     role: role,
     text: row['content'] as String,
-    createdAt: DateTime.parse(row['created_at'] as String),
+    createdAt: parseTimestampOr(
+      row['created_at'],
+      fallback: DateTime.now(),
+      context: 'chat_message.created_at',
+    ),
     conceptTags: tagsRaw.map((dynamic t) => t.toString()).toList(),
     offer: offerRaw != null ? PostSolveOffer.fromJson(offerRaw) : null,
     saveToSubjectSuggestion: row['save_to_subject'] as String?,
@@ -90,6 +102,20 @@ class RecentSessionsNotifier extends AsyncNotifier<List<StudySession>> {
     state = await AsyncValue.guard<List<StudySession>>(
       () => ref.read(sessionsRepositoryProvider).recent(),
     );
+  }
+
+  /// Delete a session + patch local state immediately so the user
+  /// doesn't see a "deleting…" lag.
+  Future<void> deleteSession(String sessionId) async {
+    await ref.read(sessionsRepositoryProvider).delete(sessionId);
+    final List<StudySession> current = state.value ?? const <StudySession>[];
+    state = AsyncData(<StudySession>[
+      for (final StudySession s in current)
+        if (s.id != sessionId) s,
+    ]);
+    // Also invalidate the per-subject session list so the Subject
+    // workspace view refreshes if the user navigates there next.
+    ref.invalidate(sessionsBySubjectProvider);
   }
 }
 

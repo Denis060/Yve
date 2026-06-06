@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
+
 enum MaterialKind { pdf, image, note, url, doc }
 
 enum MaterialStatus { queued, processing, ready, failed }
@@ -65,7 +67,11 @@ class MaterialItem {
       subjectId: row['subject_id'] as String,
       kind: MaterialKindX.fromWire(row['kind'] as String?),
       name: (row['name'] as String?) ?? 'Untitled',
-      addedAt: DateTime.parse(row['created_at'] as String),
+      addedAt: parseTimestampOr(
+        row['created_at'],
+        fallback: DateTime.now(),
+        context: 'material_item.created_at',
+      ),
       status: MaterialStatusX.fromWire(row['status'] as String?),
       sourceUri: row['source_uri'] as String?,
       error: row['error'] as String?,

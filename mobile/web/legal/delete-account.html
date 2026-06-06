@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your Yve account</title>
+<style>
+  :root {
+    --primary: #1B4332;
+    --primary-light: #2D6A4F;
+    --surface: #FAFAFA;
+    --text: #1A1A1A;
+    --text-secondary: #525252;
+    --border: #E5E5E5;
+    --error: #DC2626;
+  }
+  html, body { margin: 0; padding: 0; background: var(--surface); color: var(--text); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .container { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+  header { display: flex; align-items: center; gap: 10px; padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+  header .mark { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--primary-light)); color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; }
+  header .name { font-weight: 700; letter-spacing: 0.5px; color: var(--primary); }
+  header a { color: inherit; text-decoration: none; }
+  h1 { color: var(--primary); font-size: 28px; margin: 0 0 12px; letter-spacing: -0.4px; }
+  h2 { color: var(--primary); font-size: 18px; margin: 28px 0 10px; letter-spacing: -0.2px; }
+  p, li { color: var(--text); font-size: 15px; }
+  p, ul, ol { margin: 0 0 16px; }
+  ol { padding-left: 22px; }
+  ol li { margin-bottom: 8px; }
+  ul { padding-left: 22px; }
+  ul li { margin-bottom: 6px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 32px 0; }
+  strong { color: var(--text); }
+  a { color: var(--primary-light); }
+  .note { background: #F0F7F2; border-left: 3px solid var(--primary-light); padding: 14px 18px; border-radius: 0 6px 6px 0; margin: 20px 0; font-size: 14px; color: var(--text-secondary); }
+  .danger { background: #FEE2E2; border-left-color: var(--error); }
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-secondary); }
+  footer a { color: var(--primary-light); }
+</style>
+</head>
+<body>
+<div class="container">
+<header>
+  <div class="mark">&#10022;</div>
+  <a href="/" class="name">Yve</a>
+</header>
+
+<h1>Delete your Yve account</h1>
+
+<p>You can delete your Yve account and all associated data directly inside the app, in under 30 seconds. No support request needed.</p>
+
+<h2>How to delete (in-app)</h2>
+
+<ol>
+  <li>Open the <strong>Yve</strong> app on your phone or web browser.</li>
+  <li>Tap the <strong>Profile</strong> tab (bottom right).</li>
+  <li>Scroll to the bottom of the Profile screen.</li>
+  <li>Tap <strong>Delete account</strong>.</li>
+  <li>Read the explanation, then tap <strong>Continue</strong>.</li>
+  <li>Type <strong>DELETE</strong> in the confirmation field.</li>
+  <li>Tap <strong>Delete account</strong> — the final red button.</li>
+</ol>
+
+<p>Your account is removed immediately and you're returned to a fresh anonymous session.</p>
+
+<h2>What gets deleted</h2>
+
+<p>Everything tied to your account:</p>
+
+<ul>
+  <li>Your account email and login identity</li>
+  <li>All subjects you've created</li>
+  <li>All chat sessions and messages</li>
+  <li>All uploaded materials (PDFs, text, images, URLs you've ingested)</li>
+  <li>All scan results and Yve's analysis of them</li>
+  <li>Your learner profile (reading level, explanation depth, tone preferences)</li>
+  <li>Auto-inferred patterns (what Yve has "noticed" about you)</li>
+  <li>Notification preferences and event history</li>
+  <li>Usage events (chat / scan / polish counters)</li>
+  <li>Concept observations and review queue</li>
+</ul>
+
+<h2>What about my subscription?</h2>
+
+<p>If you have an active Yve Pro subscription, deleting your account will:</p>
+
+<ul>
+  <li>Immediately cancel your Stripe subscription</li>
+  <li>Refund any unused portion of the current billing period (pro-rated)</li>
+  <li>Stop all future charges</li>
+</ul>
+
+<h2>How long does the deletion take?</h2>
+
+<p>Active data is removed from Yve's database within seconds. From encrypted backups, all traces of your account are gone within <strong>30 days</strong> (our rolling backup window).</p>
+
+<div class="note danger">
+  <strong>This action is permanent.</strong> We cannot recover a deleted account — not by support request, not by court order, not by anything. If you only want a break, sign out instead: your work stays put and you can return any time by signing back in.
+</div>
+
+<h2>What if I can't access the app?</h2>
+
+<p>If you can't sign in or reach the in-app Delete account button for any reason, email <a href="mailto:hello@getyve.com">hello@getyve.com</a> from the email address on your Yve account, with the subject line <strong>"Delete my account"</strong>. We respond within 14 days and process the deletion within 30 days of that response.</p>
+
+<h2>What we keep, briefly</h2>
+
+<p>Two narrow exceptions to the "everything is gone" rule:</p>
+
+<ul>
+  <li><strong>Stripe billing records</strong> — Stripe retains them for tax compliance per their terms (typically 7 years). These are not visible inside Yve and we cannot delete them on Stripe's behalf.</li>
+  <li><strong>Email delivery events</strong> — A 24-month retention of "we sent you an email at this address" records, used to honor unsubscribes. No content, no context.</li>
+</ul>
+
+<p>Both are covered in our <a href="/legal/privacy">Privacy Policy &sect; 5</a>.</p>
+
+<hr>
+
+<p style="font-size: 13px; color: var(--text-secondary);"><em>Yve &mdash; your calm AI learning workspace. Questions? <a href="mailto:hello@getyve.com">hello@getyve.com</a>.</em></p>
+
+<footer>
+  &copy; 2026 Yve. <a href="/legal/privacy">Privacy</a> &middot; <a href="/legal/terms">Terms</a> &middot; <a href="mailto:hello@getyve.com">hello@getyve.com</a>
+</footer>
+</div>
+</body>
+</html>

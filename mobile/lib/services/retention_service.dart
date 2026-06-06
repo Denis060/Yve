@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -64,7 +66,12 @@ class RetentionRepository {
   Future<Recap> composeRecap() async {
     final res = await _client.functions.invoke(
       'yve-recap',
-      body: <String, dynamic>{},
+      body: <String, dynamic>{
+        // Device locale so the weekly recap renders in the learner's
+        // language. Server allow-lists supported codes; English-default
+        // when unknown.
+        'locale': ui.PlatformDispatcher.instance.locale.toLanguageTag(),
+      },
     );
     final Map<String, dynamic> data = res.data is Map
         ? Map<String, dynamic>.from(res.data as Map<dynamic, dynamic>)

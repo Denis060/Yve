@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
+
 /// User-visible plan tier. v1 ships three Pro cadences plus the
 /// 3-day trial (which renders to the user as "Pro Trial" but resolves
 /// to Pro caps everywhere it matters).
@@ -105,8 +107,6 @@ class Entitlement {
   bool get isPlus => isPro;
 
   factory Entitlement.fromRow(Map<String, dynamic> row) {
-    final String? endRaw = row['current_period_end'] as String?;
-    final String? trialRaw = row['trial_end'] as String?;
     return Entitlement(
       // Phase-1 migration renamed `plan` to `plan_code`. Read the new
       // column with a fallback to the old key for any cached row.
@@ -114,8 +114,17 @@ class Entitlement {
         (row['plan_code'] as String?) ?? (row['plan'] as String?),
       ),
       status: EntitlementStatusX.fromWire(row['status'] as String?),
-      currentPeriodEnd: endRaw == null ? null : DateTime.parse(endRaw),
-      trialEnd: trialRaw == null ? null : DateTime.parse(trialRaw),
+      // Safe parse — Supabase columns are nullable, and edge cases
+      // (empty string, missing key) shouldn't crash an entitlement
+      // read. Returns null on any bad input.
+      currentPeriodEnd: parseTimestampOrNull(
+        row['current_period_end'],
+        context: 'entitlement.current_period_end',
+      ),
+      trialEnd: parseTimestampOrNull(
+        row['trial_end'],
+        context: 'entitlement.trial_end',
+      ),
       cancelAtPeriodEnd: (row['cancel_at_period_end'] as bool?) ?? false,
     );
   }
@@ -126,7 +135,7 @@ class Entitlement {
 /// draft is too long for free." `word` and `scan` and `subjects` are
 /// declared so the parser is forward-compatible with caps not yet
 /// wired in v1.
-enum CapKind { chat, polish, word, scan, subjects }
+enum CapKind { chat, polish, word, scan, subjects, anonymousLimit }
 
 extension CapKindX on CapKind {
   static CapKind fromWire(String? wire) {
@@ -136,6 +145,7 @@ extension CapKindX on CapKind {
       'word' => CapKind.word,
       'scan' => CapKind.scan,
       'subjects' => CapKind.subjects,
+      'anonymous_limit' => CapKind.anonymousLimit,
       _ => CapKind.chat,
     };
   }

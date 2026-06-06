@@ -1,7 +1,7 @@
 name: yve
 description: Yve — your calm AI learning workspace. Scan, ask, organize what you learn.
 publish_to: 'none'
-version: 0.2.0+1
+version: 0.3.6+13
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -24,8 +24,16 @@ dependencies:
   shared_preferences: ^2.3.0
   file_picker: ^8.0.0
 
-  # Camera + gallery — powers the Scan tab and chat image attachments
+  # Camera + gallery — powers the Scan tab and chat image attachments.
+  # `image_picker` is still used for "Gallery" entry; `camera` drives the
+  # live viewfinder so the user sees what they're framing before capture.
   image_picker: ^1.1.0
+  camera: ^0.11.0
+
+  # Post-capture crop step. Opens the platform-native cropper (UCrop on
+  # Android, UI on iOS). Lets learners trim glare, isolate a single
+  # question on a worksheet, or remove margins before OCR.
+  image_cropper: ^8.0.0
 
   # Direct HTTP — Supabase SDK's functions.invoke() returns a single Response,
   # so streaming chats bypass it and POST to the Edge Function URL ourselves.
@@ -48,6 +56,11 @@ dependencies:
   # Streaming-friendly — re-parses on each delta as the text grows.
   flutter_markdown: ^0.7.4
 
+  # LaTeX/math rendering. Used by widgets/yve_markdown.dart to render
+  # display ($$...$$) and inline ($...$) math from Yve's responses.
+  # Native Flutter rendering — no webview, no JS, mobile-safe.
+  flutter_math_fork: ^0.7.2
+
   # Export Yve's responses — copy to clipboard, save as .md or Word.
   # share_plus routes per platform: web triggers download, mobile opens
   # the system share sheet. `markdown` lets us render to HTML for Word.
@@ -56,11 +69,89 @@ dependencies:
 
   # Misc
   url_launcher: ^6.3.0
+  # web — JS interop for the few web-only entry points (URL cleanup
+  # at boot to recover from stale OAuth callbacks). No-op on mobile.
+  web: ^1.1.0
+
+  # In-app OAuth on mobile. Custom Tabs (`url_launcher`'s
+  # inAppBrowserView) don't dispatch Android App Link intents on the
+  # OAuth callback redirect, and Samsung Internet silently swallows
+  # custom-scheme links even from a bridge page. An embedded WebView
+  # lets Yve intercept the callback URL directly and exchange the auth
+  # code without leaving the app — works on every Android device
+  # regardless of which browser the user has as default.
+  webview_flutter: ^4.10.0
+
+  # Pull the actual device model into the WebView's User-Agent so that
+  # Google's "you just signed in with X" security notification shows
+  # the user's real phone (SM-A256E, etc.) instead of a hard-coded
+  # "Pixel 6" — otherwise users panic thinking someone hacked them.
+  device_info_plus: ^11.1.0
+
+  # Crypto primitives — used for Sign in with Apple nonce hashing
+  # (SHA-256 of a per-session random nonce; Apple signs the hash into
+  # the ID token and Supabase verifies the round-trip).
+  crypto: ^3.0.5
+
+  # Sign in with Apple — required by App Store Review Guideline 4.8
+  # if we offer ANY third-party login (we offer Google → Apple is
+  # mandatory). Native iOS sheet on iPhone, web-based fallback on
+  # Android. Returns an identity token Supabase verifies via the
+  # Apple Sign In provider config.
+  sign_in_with_apple: ^6.1.4
+
+  # Production error monitoring. Captures unhandled Flutter framework
+  # errors + Dart async errors + native crashes. We tag every event
+  # with the current Supabase user_id (when authed) so support inbox
+  # questions like "I got a weird error around 9pm" can be cross-
+  # referenced to a real session. Free tier covers 5k errors/month
+  # which is plenty pre-launch; bump to Team plan once we have real
+  # production traffic.
+  sentry_flutter: ^9.20.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
 
+  # One-time generators for platform icons and splash screens. Run them
+  # after editing assets/icon/ to regenerate the platform-specific files:
+  #
+  #   dart run flutter_launcher_icons
+  #   dart run flutter_native_splash:create
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.1
+
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icon/
+
+# Generates platform launcher icons from a single 1024×1024 source.
+# Android adaptive icons split into a solid background (brand primary)
+# plus a transparent foreground ✦ so circle/squircle masks crop cleanly.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/yve_icon.png"
+  adaptive_icon_background: "#1B4332"
+  adaptive_icon_foreground: "assets/icon/yve_icon_foreground.png"
+  remove_alpha_ios: true
+  min_sdk_android: 23
+
+# Generates the launch screen the OS shows before Flutter takes over.
+# Centers the transparent ✦ on the brand primary green; dark-mode variant
+# stays identical because the brand surface is already dark.
+flutter_native_splash:
+  color: "#1B4332"
+  image: "assets/icon/yve_splash.png"
+  color_dark: "#1B4332"
+  image_dark: "assets/icon/yve_splash.png"
+  android_12:
+    color: "#1B4332"
+    image: "assets/icon/yve_splash.png"
+    color_dark: "#1B4332"
+    image_dark: "assets/icon/yve_splash.png"
+  android: true
+  ios: true
+  web: false

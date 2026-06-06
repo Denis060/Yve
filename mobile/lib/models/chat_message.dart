@@ -34,11 +34,17 @@ class ChatMessage {
   final bool isStreaming;
   final Polish? polish;
 
+  /// `copyWith` can't *clear* an optional field via `field: null`
+  /// because the `??` fallback treats null as "no override". For each
+  /// nullable field the caller wants to set back to null (the dismiss-
+  /// banner case is the canonical example), pass the matching `clear*`
+  /// flag instead.
   ChatMessage copyWith({
     String? text,
     PostSolveOffer? offer,
     List<String>? conceptTags,
     String? saveToSubjectSuggestion,
+    bool clearSaveToSubjectSuggestion = false,
     bool? isStreaming,
     Polish? polish,
   }) {
@@ -49,8 +55,9 @@ class ChatMessage {
       createdAt: createdAt,
       offer: offer ?? this.offer,
       conceptTags: conceptTags ?? this.conceptTags,
-      saveToSubjectSuggestion:
-          saveToSubjectSuggestion ?? this.saveToSubjectSuggestion,
+      saveToSubjectSuggestion: clearSaveToSubjectSuggestion
+          ? null
+          : (saveToSubjectSuggestion ?? this.saveToSubjectSuggestion),
       isStreaming: isStreaming ?? this.isStreaming,
       polish: polish ?? this.polish,
     );

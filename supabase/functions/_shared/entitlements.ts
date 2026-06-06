@@ -27,6 +27,7 @@ import { getServiceClient } from './service_client.ts';
 // ─────────────────────────────────────────────────────────────────────
 
 export type PlanCode =
+  | 'anonymous'
   | 'free'
   | 'pro_trial'
   | 'pro_monthly'
@@ -105,10 +106,9 @@ interface OverrideRow {
 // Resolver
 // ─────────────────────────────────────────────────────────────────────
 
-/// Resolve the full entitlement for a user. Lazy-defaults to free/active
-/// when no subscriptions row exists yet — important because anonymous
-/// users and brand-new signups hit yve-chat before they've touched the
-/// upgrade flow.
+/// Resolve the full entitlement for a user. Routes anonymous Supabase
+/// users to the 'anonymous' plan (tighter, lifetime-enforced caps) and
+/// authed users without a subscription to the 'free' plan.
 ///
 /// All reads use the service client. Entitlement is privileged
 /// server-side state; routing it through the user's RLS context was
@@ -116,28 +116,39 @@ interface OverrideRow {
 /// even when they had an active Pro subscription). The `client`
 /// parameter is kept for backwards compatibility with existing
 /// callsites; it's no longer used here.
+///
+/// [isAnonymous] should be the value of `user.isAnonymous` from
+/// `client.auth.getUser()`. Pass false (the default) if you can't
+/// determine it — the user will resolve as 'free' rather than
+/// 'anonymous', which is the more permissive option.
 export async function loadEntitlement(
   _unused: SupabaseClient,
   userId: string,
+  isAnonymous = false,
 ): Promise<Entitlement> {
   const svc = getServiceClient();
-  let planCode: PlanCode = 'free';
+  let planCode: PlanCode = isAnonymous ? 'anonymous' : 'free';
   let status: SubStatus = 'active';
 
-  try {
-    const { data, error } = await svc
-      .from('subscriptions')
-      .select('plan_code, status')
-      .eq('user_id', userId)
-      .in('status', ['active', 'trialing', 'past_due', 'incomplete'])
-      .maybeSingle();
-    if (error) console.error('loadEntitlement: select error', error);
-    if (data) {
-      planCode = (data.plan_code as PlanCode) ?? 'free';
-      status = (data.status as SubStatus) ?? 'active';
+  // Anonymous users by definition can't have a paid subscription —
+  // skip the subscriptions read entirely. Saves a query and keeps
+  // the path simple for the guest-preview cohort.
+  if (!isAnonymous) {
+    try {
+      const { data, error } = await svc
+        .from('subscriptions')
+        .select('plan_code, status')
+        .eq('user_id', userId)
+        .in('status', ['active', 'trialing', 'past_due', 'incomplete'])
+        .maybeSingle();
+      if (error) console.error('loadEntitlement: select error', error);
+      if (data) {
+        planCode = (data.plan_code as PlanCode) ?? 'free';
+        status = (data.status as SubStatus) ?? 'active';
+      }
+    } catch (e) {
+      console.error('loadEntitlement: subscriptions read failed', e);
     }
-  } catch (e) {
-    console.error('loadEntitlement: subscriptions read failed', e);
   }
 
   const base = await loadPlanLimits(svc, planCode);
@@ -150,7 +161,8 @@ export async function loadEntitlement(
   // hasn't confirmed yet — for v1 we treat them as Pro on a short
   // optimistic window. Canceled drops to free via the row no longer
   // matching the IN-list above (so this code path won't see it).
-  const isPaid = planCode !== 'free';
+  // Anonymous + Free are both non-paid for gating purposes.
+  const isPaid = planCode !== 'free' && planCode !== 'anonymous';
 
   return { planCode, status, caps, isPaid };
 }
@@ -248,23 +260,38 @@ function mergeCaps(
 /// Two ceilings apply: the per-tier cap, and the fair-use cap. The
 /// effective limit is the minimum of the two (handling nulls). When
 /// both are null the user is truly unlimited.
+///
+/// For [PlanCode]='anonymous', the cap is enforced LIFETIME instead of
+/// daily — guest users get one preview-sized window, not unlimited
+/// daily resets. Caller signals this via [planCode].
 export async function loadChatQuota(
   client: SupabaseClient,
   userId: string,
   caps: PlanCaps,
+  planCode: PlanCode = 'free',
 ): Promise<QuotaState> {
-  const today = utcDayString();
+  const isAnonymous = planCode === 'anonymous';
   const limit = minLimit(caps.chatMessagesPerDay, caps.hardDailyMessageCap);
 
   let used = 0;
   try {
-    const { data } = await client
-      .from('daily_usage')
-      .select('chat_turns')
-      .eq('user_id', userId)
-      .eq('day', today)
-      .maybeSingle();
-    used = (data?.chat_turns as number | undefined) ?? 0;
+    if (isAnonymous) {
+      const { count } = await getServiceClient()
+        .from('usage_events')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('kind', 'chat_turn');
+      used = count ?? 0;
+    } else {
+      const today = utcDayString();
+      const { data } = await client
+        .from('daily_usage')
+        .select('chat_turns')
+        .eq('user_id', userId)
+        .eq('day', today)
+        .maybeSingle();
+      used = (data?.chat_turns as number | undefined) ?? 0;
+    }
   } catch (e) {
     console.error('loadChatQuota failed', e);
   }
@@ -273,7 +300,9 @@ export async function loadChatQuota(
     exceeded: limit !== null && used >= limit,
     used,
     limit,
-    resetAtUtc: nextUtcMidnight(),
+    // No daily reset for anonymous — there's no "tomorrow" path
+    // forward except creating an account. Surface that honestly.
+    resetAtUtc: isAnonymous ? '' : nextUtcMidnight(),
   };
 }
 
@@ -285,19 +314,30 @@ export async function loadScanQuota(
   client: SupabaseClient,
   userId: string,
   caps: PlanCaps,
+  planCode: PlanCode = 'free',
 ): Promise<QuotaState> {
-  const today = utcDayString();
+  const isAnonymous = planCode === 'anonymous';
   const limit = caps.scansPerDay;
 
   let used = 0;
   try {
-    const { data } = await client
-      .from('daily_usage')
-      .select('scan_count')
-      .eq('user_id', userId)
-      .eq('day', today)
-      .maybeSingle();
-    used = (data?.scan_count as number | undefined) ?? 0;
+    if (isAnonymous) {
+      const { count } = await getServiceClient()
+        .from('usage_events')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('kind', 'scan_run');
+      used = count ?? 0;
+    } else {
+      const today = utcDayString();
+      const { data } = await client
+        .from('daily_usage')
+        .select('scan_count')
+        .eq('user_id', userId)
+        .eq('day', today)
+        .maybeSingle();
+      used = (data?.scan_count as number | undefined) ?? 0;
+    }
   } catch (e) {
     console.error('loadScanQuota failed', e);
   }
@@ -306,7 +346,7 @@ export async function loadScanQuota(
     exceeded: limit !== null && used >= limit,
     used,
     limit,
-    resetAtUtc: nextUtcMidnight(),
+    resetAtUtc: isAnonymous ? '' : nextUtcMidnight(),
   };
 }
 
@@ -314,15 +354,30 @@ export async function loadScanQuota(
 // Quota state — polish (weekly cap OR daily cap, depending on tier)
 // ─────────────────────────────────────────────────────────────────────
 
-/// Polish caps come in two flavors: weekly (free) and daily (trial).
-/// Pro tiers are unlimited (subject to fair-use). The shape of the
-/// returned QuotaState mirrors whichever cap actually applies — the
-/// caller doesn't need to know which window was used.
+/// Polish caps come in flavors: lifetime (anonymous), weekly (free),
+/// daily (trial), or unlimited (Pro). Caller signals planCode so we
+/// pick the right window.
 export async function loadPolishQuota(
   client: SupabaseClient,
   userId: string,
   caps: PlanCaps,
+  planCode: PlanCode = 'free',
 ): Promise<QuotaState> {
+  // Anonymous: lifetime cap on polish runs (no reset).
+  if (planCode === 'anonymous' && caps.polishRunsPerDay !== null) {
+    const { count } = await getServiceClient()
+      .from('usage_events')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('kind', 'polish_run');
+    const used = count ?? 0;
+    return {
+      exceeded: used >= caps.polishRunsPerDay,
+      used,
+      limit: caps.polishRunsPerDay,
+      resetAtUtc: '',
+    };
+  }
   // Daily cap takes precedence when both are set (trial = 5/day,
   // weekly = null). For free (weekly = 1, daily = null) we fall
   // through to the weekly branch.

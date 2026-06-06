@@ -2,8 +2,16 @@
 .env
 .env.local
 .env.*.local
+# .env.example is used locally as a personal key vault (real values that
+# can only be retrieved once). Keep it OUT of git despite the name.
+.env.example
+# Claude Code machine-local settings — can contain approved commands with
+# tokens baked in. Personal to this machine; never commit.
+.claude/settings.local.json
 # Note: mobile/lib/config/env.dart only holds compile-time defaults.
-# Real keys should be passed via --dart-define at build time, not pasted here.
+# Real keys should be passed via --dart-define-from-file at build time.
+# See mobile/dart_defines.json.template.
+mobile/dart_defines.json
 
 # Flutter / Dart
 mobile/.dart_tool/

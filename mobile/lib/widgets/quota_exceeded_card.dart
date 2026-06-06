@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/entitlement.dart';
 import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
+import 'anonymous_continuation_panel.dart';
 
 /// The cap-hit moment — the single most important conversion event in
 /// Yve's funnel. A learner hit a wall. They're now deciding whether
@@ -83,6 +84,7 @@ class QuotaExceededCard extends StatelessWidget {
         return 'Your draft starts: "${q.draftPreview}"';
       case CapKind.scan:
       case CapKind.subjects:
+      case CapKind.anonymousLimit:
         return null;
     }
   }
@@ -136,6 +138,7 @@ class _Headline extends StatelessWidget {
       CapKind.word   => 'Your draft is longer than Free can polish.',
       CapKind.scan   => 'Daily scans used.',
       CapKind.subjects => 'You\'re at the Free subject limit.',
+      CapKind.anonymousLimit => 'Keep going with Yve.',
     };
     return Text(
       text,
@@ -171,6 +174,8 @@ class _SubLine extends StatelessWidget {
             : 'Free includes ${quota.limit} scans a day. Resets ${quota.resetRelative}.',
       CapKind.subjects =>
         'Free includes ${quota.limit} subject. Pro includes as many as you need.',
+      CapKind.anonymousLimit =>
+        "You've finished your first assignment with Yve. Create a free account to keep your work, continue tomorrow, and protect your progress across devices.",
     };
     return Text(
       text,
@@ -218,16 +223,21 @@ class _CtaRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // CTA label hints at the trial only when it's actually offered
-    // (i.e. for free users). A Pro user hitting the fair-use ceiling
-    // would see different copy — that path isn't exercised in v1, but
-    // we keep the label generic ("Continue with Pro") when not free.
-    final String primaryLabel = quota.plan == Plan.free
-        ? 'Start your 3-day Pro trial'
-        : 'Continue with Pro';
-    final String? secondary = quota.resetAtUtc == null
-        ? null
-        : 'Or wait — your chats come back ${quota.resetRelative}';
+    // Anonymous cap → save-account framing, opens the continuity panel
+    // directly (no pricing screen). Everything else → standard
+    // trial/Pro CTA via onUpgrade.
+    final bool isAnonymous = quota.kind == CapKind.anonymousLimit;
+    final String primaryLabel = isAnonymous
+        ? 'Save my work to Yve'
+        : quota.plan == Plan.free
+            ? 'Start your 3-day Pro trial'
+            : 'Continue with Pro';
+    final String? secondary = isAnonymous
+        // Honest about the constraint without pressure.
+        ? 'Your guest preview has reached its limit.'
+        : quota.resetAtUtc == null
+            ? null
+            : 'Or wait — your chats come back ${quota.resetRelative}';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -235,9 +245,16 @@ class _CtaRow extends StatelessWidget {
         SizedBox(
           width: double.infinity,
           child: FilledButton(
-            onPressed: () {
+            onPressed: () async {
               HapticFeedback.selectionClick();
-              onUpgrade();
+              if (isAnonymous) {
+                await showAnonymousContinuation(context);
+                // The auth listener inside EntitlementNotifier picks
+                // up the new session automatically; the cap-hit card
+                // will clear on the next chat turn.
+              } else {
+                onUpgrade();
+              }
             },
             style: FilledButton.styleFrom(
               backgroundColor: YveColors.primary,

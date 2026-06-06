@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/voice_service.dart';
 import '../theme/yve_colors.dart';
+import '../utils/auth_gate.dart';
 
 /// Per-Yve-bubble speaker icon that toggles TTS playback for that message.
 /// Subscribes to [VoiceService.speakingMessageId] so the icon flips between
@@ -44,11 +45,27 @@ class _SpeakAloudButtonState extends ConsumerState<SpeakAloudButton> {
   Future<void> _onTap() async {
     HapticFeedback.selectionClick();
     final VoiceService voice = ref.read(voiceServiceProvider);
+    // Stopping playback should always work — anonymous or not.
     if (_activeId == widget.messageId) {
       await voice.stopSpeaking();
-    } else {
-      await voice.speak(widget.messageId, widget.text);
+      return;
     }
+    // Starting playback is gated behind sign-in. Otherwise tapping
+    // the speaker icon as a guest just did nothing silently — no
+    // feedback, no prompt. Now it routes through the auth panel so
+    // the user knows there's a step to take.
+    await runIfAuthed(
+      context,
+      ref,
+      gateTitle: 'Sign in to hear Yve read aloud',
+      gateBody:
+          'Yve\'s audio reader is part of saving your work to your '
+          'account — so the same response sounds the same wherever '
+          'you keep studying.',
+      action: () async {
+        await voice.speak(widget.messageId, widget.text);
+      },
+    );
   }
 
   @override

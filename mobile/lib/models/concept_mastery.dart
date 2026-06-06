@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/yve_colors.dart';
+import '../utils/safe_parse.dart';
 import 'yve_response.dart';
 
 /// Per-concept rollup from the concept_mastery view. Powers the Subject
@@ -77,7 +78,11 @@ class ConceptMastery {
     return ConceptMastery(
       concept: row['concept'] as String,
       observations: (row['n_observations'] as int?) ?? 1,
-      lastSeenAt: DateTime.parse(row['last_seen_at'] as String),
+      lastSeenAt: parseTimestampOr(
+        row['last_seen_at'],
+        fallback: DateTime.now(),
+        context: 'concept_mastery.last_seen_at',
+      ),
       confidence:
           ConfidenceSignal.fromWire(row['current_confidence'] as String?),
       subjectId: row['subject_id'] as String?,

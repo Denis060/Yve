@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy to dart_defines.json (gitignored) and fill in the real values. Used by both `flutter run` and `flutter build` via --dart-define-from-file=dart_defines.json. Only PUBLIC keys belong here — the file ships baked into the APK/AAB.",
+  "SUPABASE_URL": "https://YOUR-PROJECT-REF.supabase.co",
+  "SUPABASE_ANON_KEY": "eyJhbGci..."
+}

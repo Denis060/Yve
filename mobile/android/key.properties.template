@@ -1,0 +1,25 @@
+# Release-signing config for Yve's Android build.
+#
+# To go from debug-signed (sideload-only) to release-signed (Play Store
+# uploadable), copy this file to `android/key.properties` and fill it in.
+# The real file is gitignored — never commit it.
+#
+# 1) Generate an upload keystore (one-time, ~30s):
+#
+#    keytool -genkey -v -keystore android/yve-upload-keystore.jks ^
+#      -keyalg RSA -keysize 2048 -validity 10000 -alias yve-upload
+#
+#    Pick a password. WRITE IT DOWN somewhere durable — losing it means
+#    you can never publish updates to this app on the Play Store.
+#
+# 2) Fill in the four values below (use the same password for store and key
+#    unless keytool prompted you for two different ones).
+#
+# 3) Run `flutter build appbundle --release` — the AAB lands at
+#    build/app/outputs/bundle/release/app-release.aab and is signed with
+#    your upload key, ready for Play Console.
+
+storeFile=yve-upload-keystore.jks
+storePassword=CHANGE_ME
+keyAlias=yve-upload
+keyPassword=CHANGE_ME

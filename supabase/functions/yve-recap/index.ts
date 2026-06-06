@@ -24,6 +24,7 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { trackCall } from '../_shared/providers/observability.ts';
 import { route } from '../_shared/providers/router.ts';
+import { buildLocaleAddendum } from '../_shared/yve_modes.ts';
 
 const CORS_HEADERS = {
   'access-control-allow-origin': '*',
@@ -127,6 +128,19 @@ Deno.serve(async (req) => {
     } = await client.auth.getUser();
     if (!user) return json({ error: 'not authenticated' }, 401);
 
+    // Optional BCP-47 locale from the client so the recap renders in the
+    // learner's language. Best-effort: the body has historically been {}, so
+    // tolerate a missing/empty value and fall through to English silently.
+    let locale: string | undefined;
+    try {
+      const payload = await req.json();
+      if (typeof payload?.locale === 'string' && payload.locale.length > 0) {
+        locale = payload.locale as string;
+      }
+    } catch (_) {
+      // No JSON body — fine. Recap proceeds in English.
+    }
+
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
     // Pull the data Yve will reason over.
@@ -168,7 +182,7 @@ Deno.serve(async (req) => {
     const recapRoute = route({ taskType: 'recap' });
     const result = await recapRoute.provider.complete(
       {
-        systemPrompt: RECAP_SYSTEM_PROMPT,
+        systemPrompt: RECAP_SYSTEM_PROMPT + buildLocaleAddendum(locale),
         messages: [{ role: 'user', content: context }],
         tools: [{
           name: RECAP_TOOL.name,

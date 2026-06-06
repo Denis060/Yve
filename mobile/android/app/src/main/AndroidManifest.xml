@@ -1,8 +1,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Network is required for everything; plugins auto-merge it but
+         declaring explicitly avoids a future regression. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- speech_to_text. Without it the mic icon throws on first listen()
+         call instead of prompting. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <!-- flutter_local_notifications on Android 13+ (API 33). Plugin will
+         show the system permission prompt the first time we schedule a
+         nudge; without the manifest entry the prompt never appears and
+         notifications silently no-op. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- image_picker / file_picker / camera-plugin capture path. Photo-
+         library access on API 33+ falls through the system photo picker
+         which doesn't need a runtime grant. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Marked optional so devices without a camera (eg some Chromebooks)
+         can still install Yve; the scan tab gracefully falls back to
+         Gallery + Type instead when no camera is available. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
     <application
-        android:label="yve"
+        android:label="Yve"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:supportsRtl="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -11,7 +36,8 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:resizeableActivity="true">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
@@ -24,7 +50,49 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- HTTPS App Links — the proper way to round-trip back into
+                 Yve from a browser. Android fetches
+                 https://app.getyve.com/.well-known/assetlinks.json on
+                 install / first deep-link and verifies the SHA-256
+                 fingerprint matches this app's signing cert; once
+                 verified, every browser routes app.getyve.com/auth/*
+                 and /checkout/* intents straight to Yve without a
+                 chooser dialog. Works on every Android browser including
+                 Samsung Internet (the custom-scheme path below didn't). -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https"/>
+                <data android:host="app.getyve.com"/>
+                <data android:pathPrefix="/auth/callback"/>
+                <data android:pathPrefix="/checkout/"/>
+            </intent-filter>
+
+            <!-- Custom-scheme deep links — kept as a fallback for any
+                 environment where App Links verification hasn't kicked
+                 in yet (eg. cold installs that haven't hit the network
+                 to fetch assetlinks.json). -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="io.getyve.yve" android:host="login-callback"/>
+                <data android:scheme="io.getyve.yve" android:host="checkout"/>
+            </intent-filter>
         </activity>
+        <!-- image_cropper 8.x doesn't auto-merge this from its own
+             manifest — without the explicit registration the app
+             crashes the moment we try to open the cropper. The theme
+             must be an AppCompat descendant (UCrop extends AppCompat).
+             Android 16 ignores orientation locks on large screens, so
+             omitting screenOrientation lets the cropper rotate on
+             foldables/tablets and avoids the Play Console warning. -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
@@ -40,6 +108,21 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- url_launcher on Android 11+ requires a <queries> entry per
+             intent action it might invoke. Without these, canLaunchUrl
+             returns false even when Chrome is installed. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="mailto"/>
         </intent>
     </queries>
 </manifest>

@@ -1,0 +1,20 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "TEAMID.io.getyve.yve"
+        ],
+        "components": [
+          { "/": "/auth/callback*", "comment": "OAuth callback deep link" },
+          { "/": "/checkout/*",      "comment": "Stripe checkout return" }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "TEAMID.io.getyve.yve"
+    ]
+  }
+}

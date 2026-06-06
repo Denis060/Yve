@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/polish.dart';
 import '../services/export_service.dart';
 import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
 import '../utils/app_error.dart';
+import '../utils/auth_gate.dart';
+import 'yve_markdown.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 /// Render Yve's Write-mode polish response. Four sections — polished
 /// draft, what changed, notes/flags, follow-up suggestions — each
@@ -50,13 +54,9 @@ class PolishBubble extends StatelessWidget {
         children: <Widget>[
           const _SectionLabel('Polished draft'),
           const SizedBox(height: YveSpacing.sm),
-          SelectableText(
-            polish.polishedText,
-            style: const TextStyle(
-              fontSize: 14,
-              color: YveColors.textPrimary,
-              height: 1.6,
-            ),
+          YveMarkdownBody(
+            data: polish.polishedText,
+            styleSheet: _polishStyleSheet(),
           ),
           const SizedBox(height: YveSpacing.md),
           _CopyActions(
@@ -107,7 +107,37 @@ class PolishBubble extends StatelessWidget {
   }
 }
 
-class _CopyActions extends StatelessWidget {
+/// Markdown style for the polished draft body. Calibrated to feel
+/// editorial (slightly larger body, generous line-height) since this
+/// is the artifact the learner will paste into their document.
+MarkdownStyleSheet _polishStyleSheet() {
+  const TextStyle body = TextStyle(
+    fontSize: 14,
+    color: YveColors.textPrimary,
+    height: 1.6,
+  );
+  return MarkdownStyleSheet(
+    p: body,
+    h1: body.copyWith(fontSize: 18, fontWeight: FontWeight.w700, height: 1.4),
+    h2: body.copyWith(fontSize: 16, fontWeight: FontWeight.w700, height: 1.4),
+    h3: body.copyWith(fontSize: 15, fontWeight: FontWeight.w700, height: 1.4),
+    strong: body.copyWith(fontWeight: FontWeight.w700),
+    em: body.copyWith(fontStyle: FontStyle.italic),
+    listBullet: body,
+    blockSpacing: 8,
+    listIndent: 18,
+    code: const TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 13.5,
+      fontWeight: FontWeight.w600,
+      color: YveColors.textPrimary,
+      backgroundColor: YveColors.primarySurface,
+      letterSpacing: 0.2,
+    ),
+  );
+}
+
+class _CopyActions extends ConsumerWidget {
   const _CopyActions({
     required this.polish,
     this.subjectName,
@@ -126,7 +156,7 @@ class _CopyActions extends StatelessWidget {
     );
   }
 
-  Future<void> _openMore(BuildContext context) async {
+  Future<void> _openMore(BuildContext context, WidgetRef ref) async {
     HapticFeedback.selectionClick();
     final ExportService svc = ExportService();
     // Build distinct names for the polished draft vs the full analysis so
@@ -187,14 +217,23 @@ class _CopyActions extends StatelessWidget {
                 title: const Text('Save as Word'),
                 onTap: () async {
                   await close();
-                  try {
-                    await svc.shareAsWordDoc(
-                      markdownText: polish.polishedText,
-                      filename: polishedName,
-                    );
-                  } catch (e) {
-                    snack(AppError.from(e, actionContext: 'polish_export').userMessage);
-                  }
+                  if (!context.mounted) return;
+                  await runIfAuthed(
+                    context, ref,
+                    gateTitle: 'Save your polished draft to Yve',
+                    gateBody:
+                        'Word exports save your work outside Yve. Create a free account to keep your work safe across devices.',
+                    action: () async {
+                      try {
+                        await svc.shareAsWordDoc(
+                          markdownText: polish.polishedText,
+                          filename: polishedName,
+                        );
+                      } catch (e) {
+                        snack(AppError.from(e, actionContext: 'polish_export').userMessage);
+                      }
+                    },
+                  );
                 },
               ),
               ListTile(
@@ -203,14 +242,23 @@ class _CopyActions extends StatelessWidget {
                 title: const Text('Save as Markdown'),
                 onTap: () async {
                   await close();
-                  try {
-                    await svc.shareAsMarkdown(
-                      text: polish.polishedText,
-                      filename: polishedName,
-                    );
-                  } catch (e) {
-                    snack(AppError.from(e, actionContext: 'polish_export').userMessage);
-                  }
+                  if (!context.mounted) return;
+                  await runIfAuthed(
+                    context, ref,
+                    gateTitle: 'Save your polished draft to Yve',
+                    gateBody:
+                        'Markdown exports save your work outside Yve. Create a free account to keep your work safe across devices.',
+                    action: () async {
+                      try {
+                        await svc.shareAsMarkdown(
+                          text: polish.polishedText,
+                          filename: polishedName,
+                        );
+                      } catch (e) {
+                        snack(AppError.from(e, actionContext: 'polish_export').userMessage);
+                      }
+                    },
+                  );
                 },
               ),
               const Divider(height: YveSpacing.lg),
@@ -232,14 +280,23 @@ class _CopyActions extends StatelessWidget {
                 title: const Text('Save as Word'),
                 onTap: () async {
                   await close();
-                  try {
-                    await svc.shareAsWordDoc(
-                      markdownText: fullText,
-                      filename: fullName,
-                    );
-                  } catch (e) {
-                    snack(AppError.from(e, actionContext: 'polish_export').userMessage);
-                  }
+                  if (!context.mounted) return;
+                  await runIfAuthed(
+                    context, ref,
+                    gateTitle: 'Save your analysis to Yve',
+                    gateBody:
+                        'Word exports save your work outside Yve. Create a free account to keep your work safe across devices.',
+                    action: () async {
+                      try {
+                        await svc.shareAsWordDoc(
+                          markdownText: fullText,
+                          filename: fullName,
+                        );
+                      } catch (e) {
+                        snack(AppError.from(e, actionContext: 'polish_export').userMessage);
+                      }
+                    },
+                  );
                 },
               ),
               ListTile(
@@ -248,14 +305,23 @@ class _CopyActions extends StatelessWidget {
                 title: const Text('Save as Markdown'),
                 onTap: () async {
                   await close();
-                  try {
-                    await svc.shareAsMarkdown(
-                      text: fullText,
-                      filename: fullName,
-                    );
-                  } catch (e) {
-                    snack(AppError.from(e, actionContext: 'polish_export').userMessage);
-                  }
+                  if (!context.mounted) return;
+                  await runIfAuthed(
+                    context, ref,
+                    gateTitle: 'Save your analysis to Yve',
+                    gateBody:
+                        'Markdown exports save your work outside Yve. Create a free account to keep your work safe across devices.',
+                    action: () async {
+                      try {
+                        await svc.shareAsMarkdown(
+                          text: fullText,
+                          filename: fullName,
+                        );
+                      } catch (e) {
+                        snack(AppError.from(e, actionContext: 'polish_export').userMessage);
+                      }
+                    },
+                  );
                 },
               ),
               const SizedBox(height: YveSpacing.md),
@@ -267,7 +333,7 @@ class _CopyActions extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // Wrap (not Row) so the two pills flow to a second line on narrow
     // bubble widths instead of overflowing and collapsing the layout.
     return Wrap(
@@ -293,7 +359,7 @@ class _CopyActions extends StatelessWidget {
           ),
         ),
         OutlinedButton.icon(
-          onPressed: () => _openMore(context),
+          onPressed: () => _openMore(context, ref),
           icon: const Icon(Icons.more_horiz_rounded, size: 16),
           label: const Text('More'),
           style: OutlinedButton.styleFrom(

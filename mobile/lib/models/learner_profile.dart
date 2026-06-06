@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
+
 enum ReadingLevel { basic, standard, advanced }
 
 enum ExplanationDepth { brief, standard, thorough }
@@ -196,7 +198,10 @@ class LearnerProfile {
       voiceNotes: row['voice_notes'] as String?,
       autoObservedPatterns: row['auto_observed_patterns'] as String?,
       autoVoiceNotes: row['auto_voice_notes'] as String?,
-      lastInferredAt: inferredAt == null ? null : DateTime.parse(inferredAt),
+      lastInferredAt: parseTimestampOrNull(
+        inferredAt,
+        context: 'learner_profile.last_inferred_at',
+      ),
     );
   }
 

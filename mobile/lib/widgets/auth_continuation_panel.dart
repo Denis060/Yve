@@ -65,8 +65,9 @@ class _AuthContinuationPanelState
   bool _working = false;
   AppError? _error;
 
-  // True after we've fallen back from link-mode to existing-account
-  // sign-in (because the email was already on another account).
+  // True after we've fallen back from anonymous-upgrade to existing-
+  // account sign-in (because the email was already on another account).
+  // Determines which OtpPurpose we send + verify with.
   bool _isSignInFallback = false;
 
   @override
@@ -83,9 +84,13 @@ class _AuthContinuationPanelState
       _error = null;
     });
     try {
-      await ref
+      final bool ok = await ref
           .read(authServiceProvider)
-          .continueWithOAuth(provider);
+          .continueWithOAuth(provider, context: context);
+      if (!ok) {
+        if (mounted) setState(() => _working = false);
+        return;
+      }
       // signInWithOAuth/linkIdentity navigate the browser. The session
       // change will land via Supabase's auth listener; close the
       // panel optimistically and let the caller's auth-state listener
@@ -121,30 +126,59 @@ class _AuthContinuationPanelState
     });
     try {
       final AuthService auth = ref.read(authServiceProvider);
-      if (forceSignIn) {
-        await auth.sendSignInCode(email);
-        _isSignInFallback = true;
-      } else {
-        await auth.sendLinkCode(email);
-        _isSignInFallback = false;
-      }
+      _isSignInFallback = forceSignIn;
+      await auth.sendOtp(
+        email,
+        purpose: forceSignIn
+            ? OtpPurpose.signInExisting
+            : OtpPurpose.upgradeAnonymous,
+      );
       HapticFeedback.selectionClick();
       if (!mounted) return;
       setState(() => _stage = _Stage.emailCode);
     } on AuthException catch (e) {
       if (e.kind == AuthFailureKind.emailAlreadyInUse) {
-        // The email belongs to another account. Re-send as a sign-in
-        // (existing-account path) and warn the user inline that this
-        // device's anonymous work won't transfer.
-        await _sendCode(forceSignIn: true);
-      } else {
-        setState(() => _error = AppError.from(e, actionContext: 'email_send'));
+        // The email belongs to another Yve account. Ask explicitly
+        // before signing in — never silent-fall so the user understands
+        // they're switching accounts. Guest work gets transferred
+        // server-side via claim-anonymous-data after the sign-in lands.
+        if (!mounted) return;
+        setState(() => _working = false);
+        final bool? confirmed = await _confirmSignInToExisting(email);
+        if (confirmed == true) {
+          await _sendCode(forceSignIn: true);
+        }
+        return;
       }
+      setState(() => _error = AppError.from(e, actionContext: 'email_send'));
     } catch (e) {
       setState(() => _error = AppError.from(e, actionContext: 'email_send'));
     } finally {
       if (mounted) setState(() => _working = false);
     }
+  }
+
+  Future<bool?> _confirmSignInToExisting(String email) {
+    return showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('That email already has a Yve account'),
+        content: Text(
+          'Sign in to the existing account for $email? Your guest '
+          'subjects, chats, and progress will be moved over.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Use a different email'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Sign in & transfer'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _verifyCode() async {
@@ -161,10 +195,12 @@ class _AuthContinuationPanelState
       _error = null;
     });
     try {
-      await ref.read(authServiceProvider).verifyCode(
+      await ref.read(authServiceProvider).verifyOtp(
             email: _email.text.trim(),
             code: code,
-            isLink: !_isSignInFallback,
+            purpose: _isSignInFallback
+                ? OtpPurpose.signInExisting
+                : OtpPurpose.upgradeAnonymous,
           );
       HapticFeedback.lightImpact();
       if (!mounted) return;
@@ -230,8 +266,8 @@ class _AuthContinuationPanelState
                 body: _stage == _Stage.chooser
                     ? widget.body
                     : _stage == _Stage.emailEntry
-                        ? "We'll email you a 6-digit code to keep things passwordless."
-                        : 'Enter the 6-digit code we just sent to ${_email.text.trim()}.',
+                        ? "We'll email you a 6-digit code. No password to remember, no link to tap — just type it back here."
+                        : 'Type the 6-digit code we just sent to ${_email.text.trim()}.',
               ),
               const SizedBox(height: YveSpacing.lg),
               if (_stage == _Stage.chooser) ..._chooserStage(),
@@ -268,18 +304,22 @@ class _AuthContinuationPanelState
 
   // ── Chooser ────────────────────────────────────────────────────────
 
+  // Apple Sign In hidden until the Apple Developer membership activates
+  // (currently pending). Uncomment when ready — auth_service.continueWithApple
+  // is wired and just needs Supabase Apple provider config + iOS Xcode
+  // capability.
+  // Future<void> _continueWithApple() async { ... }
+
   List<Widget> _chooserStage() {
     return <Widget>[
-      _OAuthButton(
-        icon: Icons.apple,
-        label: 'Continue with Apple',
-        background: const Color(0xFF000000),
-        foreground: Colors.white,
-        onPressed: _working
-            ? null
-            : () => _continueWithOAuth(OAuthProvider.apple),
-      ),
-      const SizedBox(height: YveSpacing.sm),
+      // _OAuthButton(
+      //   icon: Icons.apple,
+      //   label: 'Continue with Apple',
+      //   background: const Color(0xFF000000),
+      //   foreground: Colors.white,
+      //   onPressed: _working ? null : _continueWithApple,
+      // ),
+      // const SizedBox(height: YveSpacing.sm),
       _OAuthButton(
         icon: Icons.g_mobiledata,
         iconSize: 28,

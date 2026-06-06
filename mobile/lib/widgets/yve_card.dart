@@ -9,6 +9,7 @@ class YveCard extends StatelessWidget {
     super.key,
     required this.child,
     this.onTap,
+    this.onLongPress,
     this.padding = const EdgeInsets.all(YveSpacing.lg),
     this.color = YveColors.surface,
     this.borderRadius,
@@ -16,6 +17,7 @@ class YveCard extends StatelessWidget {
 
   final Widget child;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final EdgeInsetsGeometry padding;
   final Color color;
   final BorderRadius? borderRadius;
@@ -34,6 +36,7 @@ class YveCard extends StatelessWidget {
         borderRadius: radius,
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: radius,
           child: Padding(padding: padding, child: child),
         ),

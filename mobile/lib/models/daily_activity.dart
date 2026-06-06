@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
+
 /// One day's chat activity. Used for the calm 7-dot strip in the Home
 /// greeting — no streak, no judgment, just "you showed up these days".
 @immutable
@@ -11,7 +13,11 @@ class DailyActivity {
 
   factory DailyActivity.fromRow(Map<String, dynamic> row) {
     return DailyActivity(
-      day: DateTime.parse(row['day'] as String),
+      day: parseTimestampOr(
+        row['day'],
+        fallback: DateTime.now(),
+        context: 'daily_activity.day',
+      ),
       messageCount: (row['message_count'] as int?) ?? 0,
     );
   }

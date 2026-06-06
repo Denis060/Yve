@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.getyve.yve",
+      "sha256_cert_fingerprints": [
+        "86:DF:15:89:B5:B1:02:37:29:58:A8:63:DF:39:A4:43:57:1F:99:F0:83:0E:A0:9D:EA:22:4F:85:FA:AB:B2:F9"
+      ]
+    }
+  }
+]

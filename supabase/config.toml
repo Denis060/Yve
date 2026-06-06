@@ -21,11 +21,25 @@ port = 54323
 enabled = true
 site_url = "http://localhost:3000"
 
-[functions]
-verify_jwt = true
+# Per-function config. JWT verification is on by default for any function
+# not listed below; opt out per function for webhooks that authenticate
+# via their own signing scheme.
 
 # Stripe webhook is called by Stripe servers — they don't (and can't) send
 # our Supabase JWT. Signature verification happens inside the function via
 # stripe.webhooks.constructEventAsync against STRIPE_WEBHOOK_SECRET.
 [functions.stripe-webhook]
 verify_jwt = false
+
+# Resend webhook authenticates via Svix signature; no Supabase JWT either.
+[functions.resend-webhook]
+verify_jwt = false
+
+# pg_cron calls this with a secret in the Authorization header (not a
+# Supabase JWT). The function itself enforces the CRON_SECRET check.
+[functions.cron-trial-ending]
+verify_jwt = false
+
+# Document export — we do our own auth check inside the function via
+# the user JWT, but we keep the default verify_jwt=true so the gateway
+# also rejects unauthenticated calls.

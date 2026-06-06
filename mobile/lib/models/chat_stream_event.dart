@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../utils/safe_parse.dart';
 import 'entitlement.dart';
 import 'polish.dart';
 import 'yve_response.dart';
@@ -118,14 +119,19 @@ ChatStreamEvent? parseChatStreamEvent(Map<String, dynamic> json) {
       if (raw == null) return null;
       return ChatStreamPolish(Polish.fromJson(raw));
     case 'quota_exceeded':
-      final String? resetRaw = json['reset_at'] as String?;
+      // Anonymous cap-hits send reset_at='' (no daily reset path).
+      // safe-parse handles null, empty string, and malformed input
+      // uniformly — never throws _FormatException.
       return ChatStreamQuotaExceeded(
         QuotaExceeded(
           plan: PlanX.fromWire(json['plan'] as String?),
           kind: CapKindX.fromWire(json['kind'] as String?),
           used: (json['used'] as int?) ?? 0,
           limit: (json['limit'] as int?) ?? 0,
-          resetAtUtc: resetRaw != null ? DateTime.parse(resetRaw) : null,
+          resetAtUtc: parseTimestampOrNull(
+            json['reset_at'],
+            context: 'quota_exceeded.reset_at',
+          ),
           mode: json['mode'] as String?,
           sessionId: json['session_id'] as String?,
           sessionTitle: json['session_title'] as String?,

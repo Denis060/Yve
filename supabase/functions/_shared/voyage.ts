@@ -15,9 +15,20 @@ export interface VoyageResult {
   inputTokens: number;
 }
 
+// Backoff schedule between Voyage 429 retries. Total max wait ~25s
+// which is tolerable for an interactive "Yve is reading this material"
+// loading state. On the free tier (3 RPM, no payment method) we
+// frequently hit the cap during testing; this schedule lets the
+// embed self-heal without bouncing the user.
+const VOYAGE_RETRY_DELAYS_MS = <const>[3_000, 7_000, 15_000];
+
 /// Embed an array of strings. Pass `input_type: 'document'` when storing
 /// material chunks; pass `'query'` when embedding the learner's question.
 /// Voyage uses different vector spaces for these two cases.
+///
+/// Retries on Voyage 429 with exponential-ish backoff
+/// ([VOYAGE_RETRY_DELAYS_MS]). After all retries are exhausted, throws
+/// the typed `voyage_rate_limited` error for the UI to surface calmly.
 export async function embedTexts(
   texts: string[],
   inputType: EmbedInputType = 'document',
@@ -32,32 +43,50 @@ export async function embedTexts(
     );
   }
 
-  const res = await fetch(VOYAGE_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: Deno.env.get('VOYAGE_MODEL') ?? DEFAULT_MODEL,
-      input: texts,
-      input_type: inputType,
-    }),
-  });
+  const maxAttempts = VOYAGE_RETRY_DELAYS_MS.length + 1;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(VOYAGE_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: Deno.env.get('VOYAGE_MODEL') ?? DEFAULT_MODEL,
+        input: texts,
+        input_type: inputType,
+      }),
+    });
 
-  if (!res.ok) {
+    if (res.ok) {
+      const data = await res.json();
+      const embeddings: number[][] = (data.data ?? []).map(
+        (d: { embedding: number[] }) => d.embedding,
+      );
+      return {
+        embeddings,
+        inputTokens: data.usage?.total_tokens ?? 0,
+      };
+    }
+
     const body = await res.text();
+    if (res.status === 429 && attempt < maxAttempts) {
+      const wait = VOYAGE_RETRY_DELAYS_MS[attempt - 1];
+      console.warn(
+        `[voyage] 429 on attempt ${attempt}/${maxAttempts}, ` +
+          `sleeping ${wait}ms before retry`,
+      );
+      await new Promise<void>((r) => setTimeout(r, wait));
+      continue;
+    }
+    if (res.status === 429) {
+      throw new Error(`voyage_rate_limited: ${body.slice(0, 200)}`);
+    }
     throw new Error(`Voyage error ${res.status}: ${body}`);
   }
 
-  const data = await res.json();
-  const embeddings: number[][] = (data.data ?? []).map(
-    (d: { embedding: number[] }) => d.embedding,
-  );
-  return {
-    embeddings,
-    inputTokens: data.usage?.total_tokens ?? 0,
-  };
+  // Unreachable — every loop iteration either returns or throws.
+  throw new Error('voyage_rate_limited: retries exhausted');
 }
 
 /// Paragraph-greedy chunker. Walks the source text, accumulating paragraphs

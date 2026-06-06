@@ -298,7 +298,10 @@ class _MaterialsTabState extends ConsumerState<_MaterialsTab> {
               return Column(
                 children: <Widget>[
                   for (final MaterialItem m in items) ...<Widget>[
-                    _MaterialCard(item: m),
+                    _MaterialCard(
+                      item: m,
+                      onDelete: () => _onDelete(m),
+                    ),
                     const SizedBox(height: YveSpacing.sm),
                   ],
                 ],
@@ -328,7 +331,7 @@ class _MaterialsTabState extends ConsumerState<_MaterialsTab> {
       ref.invalidate(materialsBySubjectProvider(widget.subject.id));
       ref.invalidate(subjectByIdProvider(widget.subject.id));
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Indexed. You can ask Yve about it now.')),
+        const SnackBar(content: Text('Saved. Yve has read it and is ready when you are.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -341,6 +344,48 @@ class _MaterialsTabState extends ConsumerState<_MaterialsTab> {
       );
     } finally {
       if (mounted) setState(() => _ingesting = false);
+    }
+  }
+
+  Future<void> _onDelete(MaterialItem m) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Delete this material?'),
+        content: Text(
+          'Yve will forget "${m.name}" from this subject. This can\'t be undone.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: YveColors.error),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await ref.read(materialsRepositoryProvider).delete(m.id);
+      if (!mounted) return;
+      ref.invalidate(materialsBySubjectProvider(widget.subject.id));
+      ref.invalidate(subjectByIdProvider(widget.subject.id));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Removed "${m.name}".')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppError.from(e, actionContext: 'delete_material').userMessage,
+          ),
+        ),
+      );
     }
   }
 }
@@ -377,7 +422,7 @@ class _AddMaterialTile extends StatelessWidget {
                   ),
                   SizedBox(width: 10),
                   Text(
-                    'Yve is reading & indexing…',
+                    'Yve is reading this material…',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -445,8 +490,9 @@ class _InlineError extends StatelessWidget {
 }
 
 class _MaterialCard extends StatelessWidget {
-  const _MaterialCard({required this.item});
+  const _MaterialCard({required this.item, this.onDelete});
   final MaterialItem item;
+  final VoidCallback? onDelete;
 
   ({IconData icon, Color tint}) _visual() {
     switch (item.kind) {
@@ -512,6 +558,31 @@ class _MaterialCard extends StatelessWidget {
               ],
             ),
           ),
+          if (onDelete != null)
+            PopupMenuButton<String>(
+              tooltip: 'More',
+              icon: const Icon(
+                Icons.more_horiz_rounded,
+                size: 20,
+                color: YveColors.textTertiary,
+              ),
+              onSelected: (String v) {
+                if (v == 'delete') onDelete!();
+              },
+              itemBuilder: (BuildContext _) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'delete',
+                  child: Row(
+                    children: <Widget>[
+                      Icon(Icons.delete_outline_rounded,
+                          size: 18, color: YveColors.error),
+                      SizedBox(width: 8),
+                      Text('Delete material'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
         ],
       ),
     );

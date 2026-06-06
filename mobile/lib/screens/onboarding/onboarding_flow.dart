@@ -217,26 +217,75 @@ class _SubjectPickerPage extends StatelessWidget {
   final List<_SubjectOption> options;
   final ValueChanged<_SubjectOption> onPick;
 
+  // Per-card pastel tints — cycles through the subject palette so each
+  // option feels distinct without anything shouting. Indexed so the
+  // visual rhythm of the grid stays stable across reorderings.
+  static const List<Color> _tints = <Color>[
+    YveColors.tintGreen,
+    YveColors.tintBlue,
+    YveColors.tintPurple,
+    YveColors.tintAmber,
+    YveColors.tintRose,
+    YveColors.surface2,
+  ];
+  static const List<Color> _accents = <Color>[
+    YveColors.primary,
+    Color(0xFF3B82F6),
+    Color(0xFF8B5CF6),
+    Color(0xFFD97706),
+    Color(0xFFEC4899),
+    YveColors.textSecondary,
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final TextTheme text = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         YveSpacing.xxl,
+        YveSpacing.lg,
         YveSpacing.xxl,
-        YveSpacing.xxl,
-        YveSpacing.xxl,
+        YveSpacing.lg,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('What are you studying?', style: text.headlineMedium),
-          const SizedBox(height: YveSpacing.sm),
-          Text(
-            'Pick one to start. You can add more anytime.',
-            style: text.bodyMedium?.copyWith(color: YveColors.textSecondary),
+          // Identity mark + tiny uppercase eyebrow — calm, branded.
+          Row(
+            children: const <Widget>[
+              _BrandMark(),
+              SizedBox(width: 8),
+              Text(
+                'TELL ME ABOUT YOU',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                  color: YveColors.accent,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: YveSpacing.xxl),
+          const SizedBox(height: YveSpacing.lg),
+          const Text(
+            'What are you studying?',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              color: YveColors.textPrimary,
+              height: 1.2,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: YveSpacing.sm),
+          const Text(
+            'Pick where to begin. Yve will adapt as you go — and you can add more subjects anytime.',
+            style: TextStyle(
+              fontSize: 14,
+              color: YveColors.textSecondary,
+              height: 1.55,
+            ),
+          ),
+          const SizedBox(height: YveSpacing.xl),
           Expanded(
             child: GridView.builder(
               physics: const BouncingScrollPhysics(),
@@ -244,39 +293,197 @@ class _SubjectPickerPage extends StatelessWidget {
                 crossAxisCount: 2,
                 crossAxisSpacing: YveSpacing.md,
                 mainAxisSpacing: YveSpacing.md,
-                childAspectRatio: 1.4,
+                childAspectRatio: 1.1,
               ),
               itemCount: options.length,
               itemBuilder: (BuildContext context, int i) {
                 final _SubjectOption opt = options[i];
-                return Material(
-                  color: YveColors.surface,
-                  borderRadius: YveSpacing.cardRadius,
-                  child: InkWell(
-                    borderRadius: YveSpacing.cardRadius,
-                    onTap: () => onPick(opt),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: YveSpacing.cardRadius,
-                        border: Border.all(color: YveColors.border),
-                      ),
-                      padding: const EdgeInsets.all(YveSpacing.lg),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: <Widget>[
-                          Text(opt.emoji,
-                              style: const TextStyle(fontSize: 28)),
-                          Text(opt.name, style: text.titleSmall),
-                        ],
-                      ),
-                    ),
-                  ),
+                return _SubjectCard(
+                  option: opt,
+                  tint: _tints[i % _tints.length],
+                  accent: _accents[i % _accents.length],
+                  // Stagger entrance — each card lags the previous by
+                  // 60ms. The first card lands when the page settles.
+                  delay: Duration(milliseconds: 60 * i),
+                  onTap: () => onPick(opt),
                 );
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Soft circular mark — the ✦ on the brand-gradient disk. Used as the
+/// tiny identifier across onboarding pages.
+class _BrandMark extends StatelessWidget {
+  const _BrandMark();
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: const BoxDecoration(
+        gradient: YveColors.brandGradient,
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: const Text(
+        '✦',
+        style: TextStyle(
+          fontSize: 12,
+          color: YveColors.textInverse,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// Single subject tile — tinted background, big emoji bubble, calm
+/// name. Entrance animation slides up + fades in after [delay] so the
+/// grid reveals in a gentle stagger rather than a hard pop.
+class _SubjectCard extends StatefulWidget {
+  const _SubjectCard({
+    required this.option,
+    required this.tint,
+    required this.accent,
+    required this.delay,
+    required this.onTap,
+  });
+
+  final _SubjectOption option;
+  final Color tint;
+  final Color accent;
+  final Duration delay;
+  final VoidCallback onTap;
+
+  @override
+  State<_SubjectCard> createState() => _SubjectCardState();
+}
+
+class _SubjectCardState extends State<_SubjectCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _enter = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  late final Animation<double> _opacity =
+      CurvedAnimation(parent: _enter, curve: Curves.easeOut);
+  late final Animation<Offset> _slide = Tween<Offset>(
+    begin: const Offset(0, 0.08),
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: _enter, curve: Curves.easeOutCubic));
+
+  bool _pressed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(widget.delay, () {
+      if (mounted) _enter.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _enter.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _opacity,
+      child: SlideTransition(
+        position: _slide,
+        child: GestureDetector(
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) {
+            setState(() => _pressed = false);
+            widget.onTap();
+          },
+          onTapCancel: () => setState(() => _pressed = false),
+          child: AnimatedScale(
+            scale: _pressed ? 0.97 : 1.0,
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOut,
+            child: Container(
+              padding: const EdgeInsets.all(YveSpacing.lg),
+              decoration: BoxDecoration(
+                color: widget.tint,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const <BoxShadow>[
+                  BoxShadow(
+                    color: Color(0x0A000000),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: <Widget>[
+                  // Emoji on a white "halo" disc — gives the icon
+                  // presence without competing with the tint.
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: const BoxDecoration(
+                      color: YveColors.surface,
+                      shape: BoxShape.circle,
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: Color(0x0F000000),
+                          blurRadius: 4,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
+                    ),
+                    alignment: Alignment.center,
+                    child: Text(
+                      widget.option.emoji,
+                      style: const TextStyle(fontSize: 24),
+                    ),
+                  ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          widget.option.name,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: YveColors.textPrimary,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: widget.accent.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 14,
+                          color: widget.accent,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

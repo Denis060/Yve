@@ -34,7 +34,7 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
   final TextEditingController _email = TextEditingController();
   final TextEditingController _code = TextEditingController();
   _Stage _stage = _Stage.email;
-  bool _isSignIn = false; // true after we've fallen back from link to sign-in
+  bool _isSignIn = false; // true after we've fallen back from upgrade-anonymous to existing-account sign-in
   bool _working = false;
   String? _error;
 
@@ -57,19 +57,16 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     });
     final AuthService auth = ref.read(authServiceProvider);
     try {
-      if (forceSignIn) {
-        await auth.sendSignInCode(email);
-        setState(() {
-          _isSignIn = true;
-          _stage = _Stage.code;
-        });
-      } else {
-        await auth.sendLinkCode(email);
-        setState(() {
-          _isSignIn = false;
-          _stage = _Stage.code;
-        });
-      }
+      await auth.sendOtp(
+        email,
+        purpose: forceSignIn
+            ? OtpPurpose.signInExisting
+            : OtpPurpose.upgradeAnonymous,
+      );
+      setState(() {
+        _isSignIn = forceSignIn;
+        _stage = _Stage.code;
+      });
       HapticFeedback.selectionClick();
     } on AuthException catch (e) {
       if (e.kind == AuthFailureKind.emailAlreadyInUse) {
@@ -97,10 +94,12 @@ class _AuthSheetState extends ConsumerState<_AuthSheet> {
     });
     final AuthService auth = ref.read(authServiceProvider);
     try {
-      await auth.verifyCode(
+      await auth.verifyOtp(
         email: _email.text.trim(),
         code: code,
-        isLink: !_isSignIn,
+        purpose: _isSignIn
+            ? OtpPurpose.signInExisting
+            : OtpPurpose.upgradeAnonymous,
       );
       if (!mounted) return;
       HapticFeedback.lightImpact();
@@ -319,7 +318,7 @@ class _Header extends StatelessWidget {
       case _Stage.email:
         title = 'Sign in to save your work';
         body =
-            'Yve will email you a 6-digit code. Your subjects, sessions, and notes from this device stay attached when you link an email here.';
+            "Yve will email you a 6-digit code. Type it back here — no link to tap, no password to remember. Your subjects, sessions, and notes stay attached.";
       case _Stage.code:
         title = isSignIn ? 'Welcome back' : 'Almost there';
         body = isSignIn

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -54,6 +55,10 @@ class VisionService {
       });
 
   Future<ScanResult> _invoke(Map<String, dynamic> body) async {
+    // Device locale so Yve's scan summary, extracted-text formatting, and
+    // action-ladder labels match the learner's language. Allow-listed
+    // server-side; unknown / English locales pass through silently.
+    body['locale'] = ui.PlatformDispatcher.instance.locale.toLanguageTag();
     final res = await _client.functions.invoke('vision-ingest', body: body);
     final Map<String, dynamic> data = res.data is Map
         ? Map<String, dynamic>.from(res.data as Map<dynamic, dynamic>)

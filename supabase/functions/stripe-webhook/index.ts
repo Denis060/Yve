@@ -30,6 +30,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+import { notify } from '../_shared/notifications.ts';
+
 const SIGNING_REPLAY_TOLERANCE_SEC = 300;
 
 interface StripeEvent {
@@ -174,6 +176,21 @@ async function dispatch(
         .from('subscriptions')
         .update({ status: 'past_due', updated_at: new Date().toISOString() })
         .eq('provider_customer_id', inv.customer);
+      // Look up the user to notify. The subscriptions row is the
+      // bridge between Stripe customer id and our user_id.
+      const { data: subRow } = await svc
+        .from('subscriptions')
+        .select('user_id')
+        .eq('provider_customer_id', inv.customer)
+        .maybeSingle();
+      const userId = subRow?.user_id as string | undefined;
+      if (userId) {
+        await notify(userId, 'payment_failed', { invoice_id: inv.id });
+      } else {
+        console.warn(
+          `[stripe-webhook] payment_failed: no subscriptions row for customer ${inv.customer}`,
+        );
+      }
       return;
     }
 
@@ -221,6 +238,15 @@ async function upsertFromSubscription(
   const planCode = planRow.plan_code as string;
   const status = mapStripeStatus(sub.status);
 
+  // Read the prior status *before* upserting so we can detect the
+  // trialing→active transition and fire trial_converted exactly once.
+  const { data: priorRow } = await svc
+    .from('subscriptions')
+    .select('status')
+    .eq('user_id', userId)
+    .maybeSingle();
+  const priorStatus = (priorRow?.status as string | undefined) ?? null;
+
   const row = {
     user_id: userId,
     plan_code: planCode,
@@ -248,14 +274,58 @@ async function upsertFromSubscription(
   if (error) throw new Error(`subscriptions upsert failed: ${error.message}`);
 
   console.log(
-    `[stripe-webhook] upserted subscription user=${userId} plan=${planCode} status=${status}`,
+    `[stripe-webhook] upserted subscription user=${userId} plan=${planCode} status=${status} (prior=${priorStatus})`,
   );
+
+  // Trial started: fire the welcome email once, the first time we
+  // see this subscription enter the trialing state. priorStatus is
+  // null when this is the very first event for the row (Stripe's
+  // customer.subscription.created firing); checking that protects
+  // against duplicate sends when Stripe re-delivers the same event.
+  if (priorStatus === null && status === 'trialing') {
+    await notify(userId, 'trial_started', {
+      plan_label: planLabelFor(planCode),
+      trial_end_human: sub.trial_end
+        ? formatHumanDate(new Date(sub.trial_end * 1000))
+        : undefined,
+      subscription_id: sub.id,
+    });
+  }
+
+  // Trial → active transition: fire trial_converted email once.
+  // We rely on the exact prior-status check + the unified frequency
+  // cap to prevent duplicates if Stripe re-delivers the event after
+  // the row is already 'active'.
+  if (priorStatus === 'trialing' && status === 'active') {
+    await notify(userId, 'trial_converted', {
+      plan_label: planLabelFor(planCode),
+      subscription_id: sub.id,
+    });
+  }
+}
+
+function planLabelFor(planCode: string): string {
+  switch (planCode) {
+    case 'pro_monthly':  return 'Pro Monthly';
+    case 'pro_semester': return 'Pro Semester';
+    case 'pro_annual':   return 'Pro Annual';
+    case 'pro_trial':    return 'Pro Trial';
+    default:             return 'Pro';
+  }
 }
 
 async function markCanceled(
   svc: ReturnType<typeof createClient>,
   sub: StripeSubscription,
 ): Promise<void> {
+  // Pull current_period_end first — that's the human-meaningful "your
+  // access continues through X" date we want to put in the email.
+  const { data: priorRow } = await svc
+    .from('subscriptions')
+    .select('user_id, current_period_end')
+    .eq('provider_subscription_id', sub.id)
+    .maybeSingle();
+
   const { error } = await svc
     .from('subscriptions')
     .update({
@@ -266,6 +336,28 @@ async function markCanceled(
     .eq('provider_subscription_id', sub.id);
   if (error) throw new Error(`mark canceled failed: ${error.message}`);
   console.log(`[stripe-webhook] canceled subscription ${sub.id}`);
+
+  const userId = priorRow?.user_id as string | undefined;
+  if (userId) {
+    await notify(userId, 'subscription_canceled', {
+      access_until: formatHumanDate(priorRow?.current_period_end as string | null | undefined),
+      subscription_id: sub.id,
+    });
+  }
+}
+
+function formatHumanDate(iso: string | null | undefined): string {
+  if (!iso) return 'the end of your billing period';
+  try {
+    const d = new Date(iso);
+    // "May 19, 2026" — readable across locales without depending on
+    // the user's locale being set on the Edge runtime.
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric', month: 'long', day: 'numeric',
+    });
+  } catch {
+    return 'the end of your billing period';
+  }
 }
 
 /// Stripe → our enum. Coalesce unpaid→past_due (same meaning) and
