@@ -20,6 +20,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../config/billing_config.dart';
 import '../screens/pricing_screen.dart';
 import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
@@ -108,15 +109,19 @@ class _SubjectLimitSheet extends StatelessWidget {
             const _ValueBullets(),
             const SizedBox(height: YveSpacing.xl),
             _ActionRow(
-              onUpgrade: () {
-                HapticFeedback.selectionClick();
-                Navigator.of(context).pop(true);
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const PricingScreen(),
-                  ),
-                );
-              },
+              // iOS pre-entitlement: no path to the Stripe pricing screen,
+              // so the upgrade CTA is hidden and only "Maybe later" shows.
+              onUpgrade: !BillingConfig.upgradeEnabled
+                  ? null
+                  : () {
+                      HapticFeedback.selectionClick();
+                      Navigator.of(context).pop(true);
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const PricingScreen(),
+                        ),
+                      );
+                    },
               onLater: () => Navigator.of(context).pop(false),
             ),
           ],
@@ -349,31 +354,36 @@ class _ValueRow extends StatelessWidget {
 
 class _ActionRow extends StatelessWidget {
   const _ActionRow({required this.onUpgrade, required this.onLater});
-  final VoidCallback onUpgrade;
+
+  /// Null when the upgrade gate is closed (iOS pre-entitlement) — the
+  /// "See Pro plans" button is omitted and only the dismiss action shows.
+  final VoidCallback? onUpgrade;
   final VoidCallback onLater;
   @override
   Widget build(BuildContext context) {
     return Column(
       children: <Widget>[
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton(
-            onPressed: onUpgrade,
-            style: FilledButton.styleFrom(
-              backgroundColor: YveColors.primary,
-              foregroundColor: YveColors.textInverse,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: const StadiumBorder(),
-              textStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.1,
+        if (onUpgrade != null) ...<Widget>[
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: onUpgrade,
+              style: FilledButton.styleFrom(
+                backgroundColor: YveColors.primary,
+                foregroundColor: YveColors.textInverse,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: const StadiumBorder(),
+                textStyle: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.1,
+                ),
               ),
+              child: const Text('See Pro plans'),
             ),
-            child: const Text('See Pro plans'),
           ),
-        ),
-        const SizedBox(height: YveSpacing.xs),
+          const SizedBox(height: YveSpacing.xs),
+        ],
         SizedBox(
           width: double.infinity,
           child: TextButton(
@@ -381,7 +391,7 @@ class _ActionRow extends StatelessWidget {
             style: TextButton.styleFrom(
               foregroundColor: YveColors.textTertiary,
             ),
-            child: const Text('Maybe later'),
+            child: Text(onUpgrade == null ? 'OK' : 'Maybe later'),
           ),
         ),
       ],

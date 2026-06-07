@@ -3,7 +3,7 @@
     "details": [
       {
         "appIDs": [
-          "TEAMID.io.getyve.yve"
+          "6F85B75H2H.io.getyve.yve"
         ],
         "components": [
           { "/": "/auth/callback*", "comment": "OAuth callback deep link" },
@@ -14,7 +14,7 @@
   },
   "webcredentials": {
     "apps": [
-      "TEAMID.io.getyve.yve"
+      "6F85B75H2H.io.getyve.yve"
     ]
   }
 }

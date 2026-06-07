@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../config/billing_config.dart';
 import '../models/entitlement.dart';
 
 /// Custom-scheme deep link Stripe redirects back to after Checkout on
@@ -171,6 +172,15 @@ class EntitlementNotifier extends AsyncNotifier<Entitlement> {
     String? successUrl,
     String? cancelUrl,
   }) async {
+    // Hard backstop for App Store compliance: never open an external
+    // Stripe checkout on iOS until the External Link entitlement lands.
+    // No iOS UI path reaches here while the gate is closed; this guards
+    // against future callers slipping through.
+    if (!BillingConfig.upgradeEnabled) {
+      throw EntitlementException(
+        message: 'In-app upgrades aren\'t available here yet.',
+      );
+    }
     // Default to platform-appropriate return URLs so the user lands back
     // in the app instead of getting stranded on a Stripe-hosted page.
     final String resolvedSuccess = successUrl ??
@@ -210,6 +220,13 @@ class EntitlementNotifier extends AsyncNotifier<Entitlement> {
   /// card. The portal handles state changes; the webhook fires events
   /// that flow back into [refresh].
   Future<void> launchPortal({String? returnUrl}) async {
+    // Same App Store backstop as launchCheckoutFor — no external billing
+    // portal link on iOS while the upgrade gate is closed.
+    if (!BillingConfig.upgradeEnabled) {
+      throw EntitlementException(
+        message: 'Billing management isn\'t available here yet.',
+      );
+    }
     // Stripe Customer Portal needs a return URL to send the user back
     // to. Same deep-link trick as Checkout — mobile gets the custom
     // scheme, web gets the running origin.

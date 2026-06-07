@@ -31,10 +31,16 @@ class QuotaExceededCard extends StatelessWidget {
     super.key,
     required this.quota,
     required this.onUpgrade,
+    this.upgradeEnabled = true,
   });
 
   final QuotaExceeded quota;
   final VoidCallback onUpgrade;
+
+  /// When false (iOS pre-entitlement), the paid upgrade CTA is suppressed
+  /// and the card shows only the calm reset/wait line. Account-creation
+  /// (anonymous cap) is unaffected — that involves no payment.
+  final bool upgradeEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +65,11 @@ class QuotaExceededCard extends StatelessWidget {
             _ContextBlock(text: ctx),
           ],
           const SizedBox(height: YveSpacing.lg),
-          _CtaRow(quota: quota, onUpgrade: onUpgrade),
+          _CtaRow(
+            quota: quota,
+            onUpgrade: onUpgrade,
+            upgradeEnabled: upgradeEnabled,
+          ),
         ],
       ),
     );
@@ -217,9 +227,14 @@ class _ContextBlock extends StatelessWidget {
 }
 
 class _CtaRow extends StatelessWidget {
-  const _CtaRow({required this.quota, required this.onUpgrade});
+  const _CtaRow({
+    required this.quota,
+    required this.onUpgrade,
+    this.upgradeEnabled = true,
+  });
   final QuotaExceeded quota;
   final VoidCallback onUpgrade;
+  final bool upgradeEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -227,6 +242,24 @@ class _CtaRow extends StatelessWidget {
     // directly (no pricing screen). Everything else → standard
     // trial/Pro CTA via onUpgrade.
     final bool isAnonymous = quota.kind == CapKind.anonymousLimit;
+
+    // iOS pre-entitlement: no paid upgrade button. Anonymous "save my
+    // work" stays (account creation, no payment). For a paid cap we drop
+    // the CTA and show only the calm reset line so the learner waits.
+    if (!upgradeEnabled && !isAnonymous) {
+      final String? wait = quota.resetAtUtc == null
+          ? null
+          : 'Your chats come back ${quota.resetRelative}.';
+      if (wait == null) return const SizedBox.shrink();
+      return Text(
+        wait,
+        style: const TextStyle(
+          fontSize: 13,
+          color: YveColors.textSecondary,
+          height: 1.5,
+        ),
+      );
+    }
     final String primaryLabel = isAnonymous
         ? 'Save my work to Yve'
         : quota.plan == Plan.free

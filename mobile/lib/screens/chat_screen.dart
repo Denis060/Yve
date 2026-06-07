@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../config/billing_config.dart';
 import '../models/chat_message.dart';
 import '../models/chat_stream_event.dart';
 import '../models/entitlement.dart';
@@ -1131,6 +1132,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                           if (i == _messages.length && _quotaHit != null) {
                             return QuotaExceededCard(
                               quota: _quotaHit!,
+                              upgradeEnabled: BillingConfig.upgradeEnabled,
                               onUpgrade: () {
                                 showUpgradeSheet(context);
                               },

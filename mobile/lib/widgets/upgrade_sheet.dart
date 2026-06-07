@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../config/billing_config.dart';
 import '../screens/pricing_screen.dart';
 
 /// Entry point preserved from the v1 upgrade flow — callers still write
@@ -15,6 +16,9 @@ Future<void> showUpgradeSheet(
   BuildContext context, {
   PricingAudience audience = PricingAudience.general,
 }) {
+  // App Store compliance: no paid-upgrade surface on iOS until the
+  // External Link entitlement is granted (see BillingConfig).
+  if (!BillingConfig.upgradeEnabled) return Future<void>.value();
   return Navigator.of(context, rootNavigator: true).push<void>(
     MaterialPageRoute<void>(
       builder: (_) => PricingScreen(audience: audience),

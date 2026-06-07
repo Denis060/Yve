@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../config/billing_config.dart';
 import '../models/account.dart';
 import '../models/entitlement.dart';
 import '../services/auth_service.dart';
@@ -401,23 +402,34 @@ class _PlanCard extends ConsumerWidget {
       error: (_, __) => const SizedBox.shrink(),
       data: (Entitlement ent) {
         if (ent.isPlus) {
+          // On iOS (upgrade gate closed) the Stripe customer portal isn't
+          // reachable, so show the plan as a non-interactive status row
+          // rather than a tap that leads nowhere.
           return _PlusRow(
             entitlement: ent,
-            onTap: () async {
-              try {
-                HapticFeedback.selectionClick();
-                await ref.read(entitlementProvider.notifier).launchPortal();
-              } catch (e) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(
-                    AppError.from(e, actionContext: 'plan_card_tap').userMessage,
-                  )),
-                );
-              }
-            },
+            onTap: !BillingConfig.upgradeEnabled
+                ? null
+                : () async {
+                    try {
+                      HapticFeedback.selectionClick();
+                      await ref
+                          .read(entitlementProvider.notifier)
+                          .launchPortal();
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(
+                          AppError.from(e, actionContext: 'plan_card_tap')
+                              .userMessage,
+                        )),
+                      );
+                    }
+                  },
           );
         }
+        // Free-plan upgrade tile is hidden entirely when the upgrade gate
+        // is closed (iOS pre-entitlement) — no external-purchase CTA.
+        if (!BillingConfig.upgradeEnabled) return const SizedBox.shrink();
         return _FreeRow(entitlement: ent);
       },
     );
@@ -506,10 +518,13 @@ class _PlusRow extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: YveColors.textInverse,
-              ),
+              // Chevron only when the row is actually tappable (manage
+              // billing). With the upgrade gate closed it's a status row.
+              if (onTap != null)
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: YveColors.textInverse,
+                ),
             ],
           ),
         ),
