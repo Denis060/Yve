@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show OAuthProvider;
 
+import '../config/auth_config.dart';
 import '../services/auth_service.dart';
 import '../theme/yve_colors.dart';
 import '../theme/yve_spacing.dart';
@@ -339,18 +340,23 @@ class _AnonymousContinuationPanelState
       //   onPressed: _working ? null : _continueWithApple,
       // ),
       // const SizedBox(height: YveSpacing.sm),
-      _OAuthButton(
-        icon: Icons.g_mobiledata,
-        iconSize: 28,
-        label: 'Continue with Google',
-        background: YveColors.surface,
-        foreground: YveColors.textPrimary,
-        borderColor: YveColors.border,
-        onPressed: _working
-            ? null
-            : () => _continueWithOAuth(OAuthProvider.google),
-      ),
-      const SizedBox(height: YveSpacing.sm),
+      // Google hidden on iOS (App Store Guideline 4.8 needs an Apple-
+      // equivalent; and Guideline 4 wants in-app sign-in, not a browser).
+      // iOS falls back to in-app email-code sign-in. Web + Android keep it.
+      if (AuthConfig.socialLoginEnabled) ...<Widget>[
+        _OAuthButton(
+          icon: Icons.g_mobiledata,
+          iconSize: 28,
+          label: 'Continue with Google',
+          background: YveColors.surface,
+          foreground: YveColors.textPrimary,
+          borderColor: YveColors.border,
+          onPressed: _working
+              ? null
+              : () => _continueWithOAuth(OAuthProvider.google),
+        ),
+        const SizedBox(height: YveSpacing.sm),
+      ],
       _OAuthButton(
         icon: Icons.mail_outline_rounded,
         label: 'Use email instead',
