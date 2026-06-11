@@ -2156,13 +2156,12 @@ class _PulseDotState extends State<_PulseDot>
   }
 }
 
-/// Renders the streaming Yve text.
+/// Renders the streaming Yve text as live markdown.
 ///
-/// While the response is mid-stream we render plain text + a blinking caret
-/// — markdown parsed on every keystroke would flicker through half-built
-/// elements (`**bo` rendering as literal asterisks until `**bold**` closes).
-/// Once streaming ends, we swap to a full markdown render with proper
-/// headings, lists, code blocks, and links.
+/// We parse markdown on every delta so headings, bold, lists, and tables
+/// format as they arrive — users never see raw `**`/`##`/`| table |` syntax.
+/// A blinking caret trails the text while streaming; once it ends the body
+/// becomes selectable.
 class _StreamingText extends StatelessWidget {
   const _StreamingText({required this.text, required this.streaming});
 
@@ -2171,27 +2170,15 @@ class _StreamingText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (streaming) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: <Widget>[
-          Flexible(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: YveColors.textPrimary,
-                fontSize: 14,
-                height: 1.6,
-              ),
-            ),
-          ),
-          const _BlinkingCaret(),
-        ],
-      );
-    }
-    return YveMarkdownBody(
+    // Render markdown live — even mid-stream — so users never watch raw
+    // **/##/| table | syntax scroll by before it "snaps" to formatted text.
+    // A partial inline mark (e.g. an unclosed `**`) may show literally for a
+    // token or two until its closer streams in; that's far less jarring than
+    // dumping raw markdown blocks/tables, and matches how Claude/ChatGPT
+    // stream. Selection is disabled mid-stream so it doesn't fight rebuilds.
+    final Widget body = YveMarkdownBody(
       data: text,
-      selectable: true,
+      selectable: !streaming,
       onTapLink: (String _, String? href, String __) async {
         if (href == null) return;
         final Uri? uri = Uri.tryParse(href);
@@ -2199,6 +2186,17 @@ class _StreamingText extends StatelessWidget {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       },
       styleSheet: _yveMarkdownStyle(context),
+    );
+    if (!streaming) return body;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        body,
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: _BlinkingCaret(),
+        ),
+      ],
     );
   }
 }
