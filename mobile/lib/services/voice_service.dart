@@ -342,18 +342,23 @@ class VoiceService {
     // content contains nested emphasis characters or stray asterisks.
     t = t
         .replaceAll(RegExp(r'```[\s\S]*?```'), ' ')                  // fenced code
-        .replaceAll(RegExp(r'`(.+?)`', dotAll: false), r'$1')         // inline code
-        .replaceAll(RegExp(r'\*\*(.+?)\*\*', dotAll: true), r'$1')   // bold
-        .replaceAll(RegExp(r'__(.+?)__', dotAll: true), r'$1')        // bold (alt)
-        .replaceAll(RegExp(r'\*(.+?)\*', dotAll: true), r'$1')        // italic
-        .replaceAll(RegExp(r'(?<!_)_(.+?)_(?!_)', dotAll: true), r'$1') // italic (alt)
-        .replaceAll(RegExp(r'~~(.+?)~~', dotAll: true), r'$1')        // strikethrough
+        // NOTE: Dart's String.replaceAll does NOT substitute capture
+        // groups (unlike JS) — passing r'$1' inserts the literal text
+        // "$1", which the later `$`-strip then turned into "1". That
+        // corrupted every bold/italic/link in spoken answers. Use
+        // replaceAllMapped + m.group(1) to keep the captured content.
+        .replaceAllMapped(RegExp(r'`(.+?)`'), (Match m) => m.group(1) ?? '')                       // inline code
+        .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*', dotAll: true), (Match m) => m.group(1) ?? '')   // bold
+        .replaceAllMapped(RegExp(r'__(.+?)__', dotAll: true), (Match m) => m.group(1) ?? '')       // bold (alt)
+        .replaceAllMapped(RegExp(r'\*(.+?)\*', dotAll: true), (Match m) => m.group(1) ?? '')       // italic
+        .replaceAllMapped(RegExp(r'(?<!_)_(.+?)_(?!_)', dotAll: true), (Match m) => m.group(1) ?? '') // italic (alt)
+        .replaceAllMapped(RegExp(r'~~(.+?)~~', dotAll: true), (Match m) => m.group(1) ?? '')       // strikethrough
         .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')       // ATX heading
         .replaceAll(RegExp(r'^={3,}|^-{3,}', multiLine: true), '')    // setext heading rules
         .replaceAll(RegExp(r'^>\s?', multiLine: true), '')            // blockquote
         .replaceAll(RegExp(r'^[\-\*\+]\s+', multiLine: true), '')     // bullets
         .replaceAll(RegExp(r'^\d+\.\s+', multiLine: true), '')        // numbered lists
-        .replaceAll(RegExp(r'\[([^\]]+)\]\([^)]+\)'), r'$1')          // links → label
+        .replaceAllMapped(RegExp(r'\[([^\]]+)\]\([^)]+\)'), (Match m) => m.group(1) ?? '')         // links → label
         .replaceAll(RegExp(r'!\[[^\]]*\]\([^)]+\)'), '')              // images → gone
         .replaceAll(RegExp(r'\|'), ' ')                               // table separators
         .replaceAll(RegExp(r'<[^>]+>'), '')                           // stray html
