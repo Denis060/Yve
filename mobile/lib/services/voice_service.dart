@@ -378,8 +378,9 @@ class VoiceService {
         .trim();
 
     // 3) Trim trailing punctuation pile-ups from list/heading stripping.
-    t = t.replaceAll(RegExp(r'\s+([.,;:])'), r'$1');
-    t = t.replaceAll(RegExp(r'([.,;:]){2,}'), r'$1');
+    //    (replaceAllMapped — replaceAll(r'$1') would insert literal "$1".)
+    t = t.replaceAllMapped(RegExp(r'\s+([.,;:])'), (Match m) => m.group(1) ?? '');
+    t = t.replaceAllMapped(RegExp(r'([.,;:])\1+'), (Match m) => m.group(1) ?? '');
     return t;
   }
 
