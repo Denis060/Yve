@@ -18,6 +18,29 @@ iOS and Android still need a new build/release to ship them to users.
    Fixed all 3 spots with `replaceAllMapped` + `m.group(1)`. Commits 01143b5, 9e1da1f.
    (On-screen text was never affected — only TTS. Word export was always fine.)
 
+3. **Home "Start here" card for new users** (`mobile/lib/screens/home_screen.dart`)
+   — brand-new learners (no subjects/sessions) see one big card with two
+   large buttons (Scan my homework / Ask Yve a question) instead of the
+   compact quick bar. Returning users unchanged. Commit 37fc7ca.
+
+4. **Chat declutter** (`mobile/lib/screens/chat_screen.dart`)
+   — topic tags + follow-up chips now render only under Yve's *latest*
+   answer (not every past one), and follow-ups cap at 3. Cleaner scroll.
+   Commit 2309596.
+
+## Version bump for this update
+
+iOS 1.0 (build 14) is already live. The update is a NEW App Store version.
+Use **1.0.1 / build 15** for iOS; bump Android `versionCode` above what's
+live. (pubspec stays the source of truth, or override at build time.)
+
+## "What's New" text (for App Store + Play Store release notes)
+
+> • Yve's answers now format beautifully as she types — no more raw symbols.
+> • Read-aloud sounds natural and clear.
+> • A friendly "Start here" guide for first-time learners.
+> • A cleaner, tidier conversation view.
+
 ## ANDROID release (build on Windows, where the keystore lives)
 
 The Android upload keystore is NOT in the repo (gitignored). Build on the
