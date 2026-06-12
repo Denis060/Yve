@@ -60,6 +60,10 @@ class HomeScreen extends ConsumerWidget {
     final Account? account = ref.watch(accountProvider).valueOrNull;
     final String greetingName = account?.friendlyName ?? 'there';
     final String tip = _tips[DateTime.now().day % _tips.length];
+    // Brand-new learner (nothing created yet) → show one big, obvious
+    // "Start here" card instead of the compact quick-action bar, so a
+    // first-time / non-technical user knows exactly what to tap.
+    final bool isNewUser = subjects.isEmpty && recent.isEmpty;
 
     StudySession? lastSession;
     if (recent.isNotEmpty) lastSession = recent.first;
@@ -127,30 +131,44 @@ class HomeScreen extends ConsumerWidget {
         children: <Widget>[
           _Header(name: greetingName, week: week, tip: tip),
           const SizedBox(height: YveSpacing.lg),
-          _QuickBar(
-            // Assignment lands in the redesigned empty state — no draft,
-            // so the snap-a-photo CTA can do the talking.
-            onAssignment: () => _openChat(
-              context,
-              mode: StudyMode.assignment,
-              draft: '',
+          if (isNewUser)
+            _StartHereCard(
+              onScanHomework: () => _openChat(
+                context,
+                mode: StudyMode.assignment,
+                draft: '',
+              ),
+              onAskQuestion: () => _openChat(
+                context,
+                mode: StudyMode.open,
+                draft: '',
+              ),
+            )
+          else
+            _QuickBar(
+              // Assignment lands in the redesigned empty state — no draft,
+              // so the snap-a-photo CTA can do the talking.
+              onAssignment: () => _openChat(
+                context,
+                mode: StudyMode.assignment,
+                draft: '',
+              ),
+              onScan: () => _openChat(
+                context,
+                mode: StudyMode.open,
+                draft: 'I have a question from a photo — let me describe it: ',
+              ),
+              onPolish: () => _openChat(
+                context,
+                mode: StudyMode.write,
+                draft: '',
+              ),
+              onQuiz: () => _openChat(
+                context,
+                mode: StudyMode.practice,
+                draft: 'Quiz me on ',
+              ),
             ),
-            onScan: () => _openChat(
-              context,
-              mode: StudyMode.open,
-              draft: 'I have a question from a photo — let me describe it: ',
-            ),
-            onPolish: () => _openChat(
-              context,
-              mode: StudyMode.write,
-              draft: '',
-            ),
-            onQuiz: () => _openChat(
-              context,
-              mode: StudyMode.practice,
-              draft: 'Quiz me on ',
-            ),
-          ),
           if (upNext.isNotEmpty) ...<Widget>[
             const SizedBox(height: YveSpacing.xxl),
             const _SectionLabel(text: 'Up next'),
@@ -509,6 +527,95 @@ class _RecapCta extends StatelessWidget {
                   color: YveColors.textTertiary),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// First-run guidance for brand-new / non-technical users: one calm card
+/// with two large, plainly-labelled buttons so it's instantly clear what
+/// to do. Replaced by the compact [_QuickBar] once the learner has any
+/// activity. Buttons use generous vertical padding for easy tapping.
+class _StartHereCard extends StatelessWidget {
+  const _StartHereCard({
+    required this.onScanHomework,
+    required this.onAskQuestion,
+  });
+
+  final VoidCallback onScanHomework;
+  final VoidCallback onAskQuestion;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: YveSpacing.xl),
+      child: Container(
+        padding: const EdgeInsets.all(YveSpacing.xl),
+        decoration: BoxDecoration(
+          color: YveColors.primarySurface,
+          borderRadius: YveSpacing.cardRadius,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text(
+              '👋 New here? Start in one tap',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: YveColors.primary,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Snap a photo of your homework, or just ask Yve a question — '
+              'in your own words.',
+              style: TextStyle(
+                fontSize: 15,
+                color: YveColors.textSecondary,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: YveSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onScanHomework,
+                icon: const Icon(Icons.center_focus_strong_rounded),
+                label: const Text('Scan my homework'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: YveColors.primary,
+                  foregroundColor: YveColors.textInverse,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  shape: const StadiumBorder(),
+                ),
+              ),
+            ),
+            const SizedBox(height: YveSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: onAskQuestion,
+                icon: const Icon(Icons.chat_bubble_outline_rounded),
+                label: const Text('Ask Yve a question'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: YveColors.primary,
+                  side: const BorderSide(color: YveColors.primary),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  shape: const StadiumBorder(),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
