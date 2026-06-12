@@ -120,7 +120,10 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
       // skip an unnecessary YUV→JPEG conversion at capture time.
       final CameraController controller = CameraController(
         chosen,
-        ResolutionPreset.high,
+        // veryHigh (~1080p) over high (~720p): sharper capture means the
+        // OCR/vision step reads small or faint handwriting far more
+        // reliably. Falls back gracefully if a device can't provide it.
+        ResolutionPreset.veryHigh,
         enableAudio: false,
         imageFormatGroup: kIsWeb ? null : ImageFormatGroup.jpeg,
       );
@@ -267,8 +270,21 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
     );
   }
 
-  void _openChatForAction(ScanResult result, ScanAction action) {
-    Navigator.of(context).push(
+  // After returning from a pushed chat route (or the native cropper), make
+  // sure the camera is live again. The scan screen lives in an IndexedStack
+  // so it never re-runs initState, and opening the chat/cropper can tear the
+  // camera session down — without this the viewfinder returns to a permanent
+  // loading spinner (the "stuck reading" the user saw). No-ops when the
+  // camera is already initialized, so it's safe to call on every return.
+  Future<void> _ensureCamera() async {
+    if (!mounted || _camera?.value.isInitialized == true) return;
+    _safelyDisposeCamera(_camera);
+    _camera = null;
+    await _initCamera();
+  }
+
+  Future<void> _openChatForAction(ScanResult result, ScanAction action) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ChatScreen.resume(
           sessionId: result.sessionId,
@@ -278,10 +294,11 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
         ),
       ),
     );
+    await _ensureCamera();
   }
 
-  void _openChatTextOnly(ScanResult result) {
-    Navigator.of(context).push(
+  Future<void> _openChatTextOnly(ScanResult result) async {
+    await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ChatScreen.resume(
           sessionId: result.sessionId,
@@ -289,6 +306,7 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
         ),
       ),
     );
+    await _ensureCamera();
   }
 
   // ── UI ────────────────────────────────────────────────────────────
@@ -312,11 +330,14 @@ class _ScanScreenState extends ConsumerState<ScanScreen>
                 _camera?.value.isInitialized == true && !_capturing,
             onCapture: _captureFromCamera,
             onGallery: _captureFromGallery,
-            onType: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const ChatScreen(),
-              ),
-            ),
+            onType: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ChatScreen(),
+                ),
+              );
+              await _ensureCamera();
+            },
           ),
         ),
         if (_processing)
