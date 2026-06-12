@@ -320,6 +320,12 @@ async function createScanSession(args: {
         : ''
     }\n\nWhat would you like to do with this?`;
 
+  // Distinct created_at so the synthetic user turn always precedes Yve's
+  // reply when the session is later loaded ordered by created_at. A batch
+  // insert otherwise stamps both rows with the same now(), leaving their
+  // order undefined (id is a random UUID, no tiebreak). The client also
+  // tiebreaks by role as belt-and-suspenders for already-saved sessions.
+  const seedNow = Date.now();
   const { error: mErr } = await args.client.from('chat_messages').insert([
     {
       session_id: sessionId,
@@ -327,6 +333,7 @@ async function createScanSession(args: {
       role: 'user',
       content: userContent,
       concept_tags: [],
+      created_at: new Date(seedNow).toISOString(),
     },
     {
       session_id: sessionId,
@@ -339,6 +346,7 @@ async function createScanSession(args: {
       save_to_subject: args.vision.save_to_subject ?? null,
       input_tokens: args.tokens.input,
       output_tokens: args.tokens.output,
+      created_at: new Date(seedNow + 1000).toISOString(),
     },
   ]);
   if (mErr) throw new Error(`chat_messages insert: ${mErr.message}`);

@@ -45,7 +45,15 @@ class SessionsRepository {
         .from('chat_messages')
         .select()
         .eq('session_id', sessionId)
-        .order('created_at', ascending: true);
+        .order('created_at', ascending: true)
+        // Tiebreaker: the scan-ingest flow seeds the user + assistant rows
+        // in a single batch insert, so they share an identical created_at
+        // and their relative order would otherwise be undefined (id is a
+        // random UUID, no help). role DESC puts 'user' before 'assistant'
+        // on a tie (u > a), keeping the "I scanned this" → "here's what I
+        // see" order correct. Normal turns differ in created_at, so this
+        // only ever matters for the scan seed pair.
+        .order('role', ascending: false);
     return rows.cast<Map<String, dynamic>>().map(_messageFromRow).toList();
   }
 

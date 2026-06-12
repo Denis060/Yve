@@ -28,6 +28,21 @@ iOS and Android still need a new build/release to ship them to users.
    answer (not every past one), and follow-ups cap at 3. Cleaner scroll.
    Commit 2309596.
 
+5. **Scan answer-ordering fix** (the "Yve's answer showed above my scanned
+   question" bug). Two parts:
+   - **Client** (`mobile/lib/services/sessions_service.dart`) — history query
+     now sorts `created_at ASC, role DESC`, so on the scan seed's identical
+     timestamp the 'user' row sorts before 'assistant'. This is the live fix
+     and ships with the Flutter app (iOS + web + Android). Fixes both new and
+     already-saved scan sessions.
+   - **Backend** (`supabase/functions/vision-ingest/index.ts`) — the two
+     seeded rows now get distinct `created_at` (user = now, assistant =
+     now + 1s) so the root cause is gone for new scans. **Needs deploying**
+     by someone with Supabase project access:
+     `supabase functions deploy vision-ingest --project-ref ftekdhcomxxhbihvsyyw`
+     (the Mac's logged-in Supabase account got a 403 — insufficient privilege).
+     Not urgent: the client fix already corrects the display everywhere.
+
 ## Version bump for this update
 
 iOS 1.0 (build 14) is already live. The update is a NEW App Store version.
