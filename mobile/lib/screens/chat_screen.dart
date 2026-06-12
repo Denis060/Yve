@@ -1144,6 +1144,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             subjectName: widget.subjectName,
                             sessionTitle: _title,
                             mode: _mode,
+                            showSuggestions: i == _messages.length - 1,
                           );
                         },
                       ),
@@ -1825,6 +1826,7 @@ class _Bubble extends StatelessWidget {
     this.subjectName,
     this.sessionTitle,
     required this.mode,
+    this.showSuggestions = true,
   });
 
   final ChatMessage message;
@@ -1835,6 +1837,9 @@ class _Bubble extends StatelessWidget {
   final String? subjectName;
   final String? sessionTitle;
   final StudyMode mode;
+  // Only the latest Yve answer shows topic tags + follow-up chips; older
+  // messages render clean (ChatGPT/Claude-style declutter).
+  final bool showSuggestions;
 
   @override
   Widget build(BuildContext context) {
@@ -1974,17 +1979,25 @@ class _Bubble extends StatelessWidget {
                           ),
                   ),
           ),
-          if (message.conceptTags.isNotEmpty) ...<Widget>[
+          // Topic tags + follow-up suggestions render only under Yve's most
+          // recent answer (ChatGPT/Claude-style) so older messages stay
+          // clean and the transcript doesn't fill with stale pills.
+          if (showSuggestions && message.conceptTags.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
             _ConceptTagRow(tags: message.conceptTags),
           ],
-          if (offer != null && offer.suggestions.isNotEmpty) ...<Widget>[
+          if (showSuggestions &&
+              offer != null &&
+              offer.suggestions.isNotEmpty) ...<Widget>[
             const SizedBox(height: YveSpacing.sm),
             Wrap(
               spacing: 6,
               runSpacing: 6,
               children: <Widget>[
-                for (int i = 0; i < offer.suggestions.length; i++)
+                // Cap at 3 so it reads as a tidy line, not a cluster.
+                for (int i = 0;
+                    i < offer.suggestions.length && i < 3;
+                    i++)
                   _OfferChip(
                     suggestion: offer.suggestions[i],
                     primary: i == 0,
