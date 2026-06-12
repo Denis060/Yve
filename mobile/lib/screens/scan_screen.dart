@@ -400,24 +400,17 @@ class _Viewfinder extends StatelessWidget {
               ),
             ),
 
-            // Centered crop guide overlay
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 260),
-                child: SizedBox(
-                  width: 300,
-                  height: 220,
-                  child: CustomPaint(painter: _CropGuidePainter()),
-                ),
-              ),
-            ),
+            // No crop-guide box: Yve captures the full frame and the user
+            // trims it in the next step (like Gauth). A box here was
+            // deceptive — it made people back the phone away to fit the
+            // page inside it, producing tiny, far-away photos.
             const Positioned(
               bottom: 300,
               left: 0,
               right: 0,
               child: Center(
                 child: Text(
-                  'Frame the page or worksheet',
+                  'Fill the screen with your page — you can trim it next',
                   style: TextStyle(
                     color: Color(0xB3FFFFFF),
                     fontSize: 13,
@@ -497,44 +490,8 @@ class _TopPill extends StatelessWidget {
   }
 }
 
-class _CropGuidePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Paint corner = Paint()
-      ..color = YveColors.accent
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    const double len = 22;
-
-    canvas.drawLine(const Offset(0, 0), const Offset(len, 0), corner);
-    canvas.drawLine(const Offset(0, 0), const Offset(0, len), corner);
-    canvas.drawLine(Offset(size.width - len, 0), Offset(size.width, 0), corner);
-    canvas.drawLine(Offset(size.width, 0), Offset(size.width, len), corner);
-    canvas.drawLine(Offset(0, size.height - len), Offset(0, size.height), corner);
-    canvas.drawLine(Offset(0, size.height), Offset(len, size.height), corner);
-    canvas.drawLine(Offset(size.width, size.height - len),
-        Offset(size.width, size.height), corner);
-    canvas.drawLine(Offset(size.width - len, size.height),
-        Offset(size.width, size.height), corner);
-
-    final Paint outline = Paint()
-      ..color = YveColors.accent.withOpacity(0.5)
-      ..strokeWidth = 1
-      ..style = PaintingStyle.stroke;
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Offset.zero & size,
-        const Radius.circular(YveSpacing.radiusCard),
-      ),
-      outline,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_CropGuidePainter oldDelegate) => false;
-}
+// (Removed _CropGuidePainter — the camera no longer draws a crop-guide box;
+// Yve captures the full frame and the user trims it in the next step.)
 
 class _ActionSheet extends StatelessWidget {
   const _ActionSheet({
@@ -586,7 +543,8 @@ class _ActionSheet extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           const Text(
-            'Frame the page, tap capture, then trim it down before Yve reads.',
+            'Point your camera so the page fills the screen, tap Capture, '
+            'then trim it before Yve reads.',
             style: TextStyle(fontSize: 13, color: YveColors.textSecondary),
           ),
           const SizedBox(height: YveSpacing.xl),
